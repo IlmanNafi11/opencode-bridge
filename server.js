@@ -12,10 +12,10 @@ const { effectiveMaxTokens } = require("./token-budget");
 /**
  * 加载同级模块；文件尚未落盘时回退。
  *
- * 存在的原因是一条真实的升级路径：2.1.0 的自更新器没有
- * `proxy.js`/`panel.js` in its file list, so updating that install to 2.2.0
+ * 存在的原因是一条真实的升级路径：2.1.0 的自更新器的文件清单里
+ * 没有 `proxy.js`/`panel.js`，于是把该安装更新到 2.2.0 时
  * 写出了一个 require 更新器从未抓取模块的 `server.js`。硬重启后必崩，
- * `require` turned that into a crash loop (`Cannot find module './proxy'`)
+ * `require` 把它变成崩溃循环（`Cannot find module './proxy'`），
  * 除了重装无路可回。缺失的可选模块
  * 必须退化为直连出口，绝不能阻止进程启动。
  *
@@ -97,7 +97,7 @@ function 本地require(source) {
   const text = String(source || "")
     .replace(/\/\*[\s\S]*?\*\//g, "")
     .replace(/(^|[^:])\/\/[^\n]*/g, "$1");
-  // `require("./x")` and the tolerant `加载本地模块("x", …)` loader both
+  // `require("./x")` 与宽容的 `加载本地模块("x", …)` 加载器都指向
   // 本服务工作所必需的文件。
   for (const re of [/\brequire\(\s*["']\.\/([A-Za-z0-9._-]+)["']\s*\)/g, /\bloadLocalModule\(\s*["']([A-Za-z0-9._-]+)["']/g]) {
     let match;
@@ -113,7 +113,7 @@ function 本地require(source) {
 /**
  * 抓取 `server.js` require 了但磁盘上还没有的文件。
  *
- * 2.1.0 shipped a self-updater whose file list predated `proxy.js`/`panel.js`,
+ * 2.1.0 附带的自更新器，其文件清单早于 `proxy.js`/`panel.js`，
  * 曾更新到 2.2.0 后写出一个启动不了的 server。这种安装现在
  * 以上面的兜底启动；下一次启动时由这里修复，而不是让面板
  * 永久不可用。尽力而为：失败保留兜底，绝不阻塞启动。
@@ -255,9 +255,9 @@ function timingSafeEqualStr(a, b) {
 }
 // 可选出站中继。设置后，每个上游推理请求都发往这个中继
 // URL 而不是直接发 opencode.ai，真实 origin 与路径经
-// x-relay-target / x-relay-path 携带（与 9Router 可部署中继
-// 9Router's Cloudflare/Vercel/Deno/Netlify relays speak). The relay performs
-// 相同）。最终 fetch 由此发起，上游看到中继的出口 IP。空 = 直连。
+// x-relay-target / x-relay-path 携带（与 9Router 的
+// Cloudflare/Vercel/Deno/Netlify 中继所说的一致）。中继执行
+// 最终 fetch，上游看到中继的出口 IP。空 = 直连。
 const UPSTREAM_RELAY_URL = (process.env.UPSTREAM_RELAY_URL || "").trim();
 
 /**
@@ -392,8 +392,8 @@ async function 检查并应用更新() {
             throw new Error(`invalid JSON in ${file}: ${err.message}`);
           }
         } else if (file.endsWith(".sh")) {
-          // `new Function` cannot parse bash. Check the shebang here and let
-          // `bash -n` parse it below, once it is on disk.
+          // `new Function` 无法解析 bash。在这里检查 shebang，
+          // 落盘后由下面的 `bash -n` 解析。
           if (!/^#!.*\b(ba)?sh\b/.test(text)) throw new Error(`${file} is not a shell script`);
         }
         const tmpPath = path.join(__dirname, `.${file}.tmp.${process.pid}`);
@@ -423,7 +423,7 @@ async function 检查并应用更新() {
 
       // 发行版可能新增一个旧 `UPDATE_FILES` 清单没有点名
       // 的模块。2.1.0 -> 2.2.0 正是如此：新 server.js require 了
-      // ./proxy and ./panel, the old updater never fetched them, and the
+      // ./proxy 与 ./panel，旧更新器从未抓取它们，于是
       // 重启后崩溃循环。读取*incoming* 的 server.js，暂存它 import
       // 的每一个本地模块，运行中进程里的文件清单就
       // 永远不会成为合法发行版起不来的原因。
@@ -476,8 +476,8 @@ async function 检查并应用更新() {
 
 function 是免费档CLI网关错误(status, errType, errMsg) {
   if (errType === "FreeTierError" || errType === "UpgradeRequired") return true;
-  // 426 is the version-floor handshake: upstream names the minimum client
-  // 它会接受的版本。视为网关信号，让身份层采纳该下限并重试。
+  // 426 是版本下限握手：上游点明它会接受的最低客户端
+  // 版本。视为网关信号，让身份层采纳该下限并重试。
   if (status === 426) return true;
   if (status !== 403 && status !== 401) return false;
   const m = String(errMsg || "").toLowerCase();
@@ -531,8 +531,8 @@ function 同步UA() {
  * 配置的出口代理作用于最终 fetch 的 URL，所以中继部署
  * 本身也能经代理拨出。
  *
- * `egressUrl` pins the egress for this call. The chat handler picks one egress
- * 逐请求挑选出口并在各重试间复用，必须留在应答过的 IP
+ * `egressUrl` 钉住本次调用的出口。chat 处理器逐请求
+ * 挑选一个出口并在各重试间复用，必须留在应答过的 IP
  * 上的重试就不会在会话中途悄悄换出口。没有它时，
  * 池逐调用挑选。
  */
@@ -607,14 +607,14 @@ function isValidV2UserAgent(ua) {
 /**
  * 免费档网关接受的 User-Agent，或身份层自己的。
  *
- * 实测（干净出口、带 `read` 工具）：不带网关会接受的 UA
- * `User-Agent`, with a bare `opencode`, or with `Mozilla/5.0 …` / `curl/8.18.0`
+ * 实测（干净出口、带 `read` 工具）：不带 `User-Agent`、只带
+ * 裸 `opencode`，或带 `Mozilla/5.0 …` / `curl/8.18.0`
  * 的请求被 403 FreeTierError 拒绝，与被封 IP 相同。只查形状，
- * `opencode/<channel>/<semver>/<name>` shape passes, and the version is not
- * 不查新鲜度（`opencode/9.9.9` 也被接受）。
+ * `opencode/<channel>/<semver>/<name>` 形状即通过，且不查
+ * 新鲜度（`opencode/9.9.9` 也被接受）。
  *
- * `OPENCODE_USER_AGENT` is an operator override, so it is honoured — but an
- * 网关会拒绝的 override 上报，而不是悄悄产出一个看起来像
+ * `OPENCODE_USER_AGENT` 是运维者覆盖，所以予以尊重 —— 但会
+ * 上报网关会拒绝的覆盖，而不是悄悄产出一个看起来像
  * 额度问题的 403。
  */
 function 网关安全UA() {
@@ -635,7 +635,7 @@ function 网关安全UA() {
   return "opencode/latest/0.0.0/cli";
 }
 
-// --- ID Generator (matches OpenCode v2 CLI format) ---
+// --- ID 生成器（匹配 OpenCode v2 CLI 格式） ---
 // 形状（charset、总长、倍率、前缀）来自 identity.js，它从
 // opencode 自己的 `packages/schema/src/identifier.ts` 推导。
 // 这里留个薄封装，既有调用点与测试继续工作。
@@ -705,8 +705,7 @@ function 允许的管理主机() {
   if (!wildcard) hosts.add(bound);
   if (wildcard) {
     // 通配绑定通常经本机自己的地址到达（LAN IP、VPS 公网 IP）。这些
-    // 可以安全接受，让 `HOST=0.0.0.0` 免配置可用；rebound 攻击域名
-    // `HOST=0.0.0.0` usable without configuration; a rebound attacker domain
+    // 可以安全接受，让 `HOST=0.0.0.0` 免配置可用；rebound 攻击者域名
     // 仍不在此集合。域名进 PANEL_ALLOWED_HOSTS。
     const os = require("os");
     for (const list of Object.values(os.networkInterfaces())) {
@@ -733,7 +732,7 @@ function adminRequestError(req) {
   // Origin 必须匹配本请求发往的 Host（覆盖面板本身，以及保持浏览器
   // origin 不变的 SSH/隧道转发），或在 CORS_ORIGIN 里显式白名单。
   // 127.0.0.1 之外的回环 origin（如 ::1）不自动信任。
-  // *different* port is another local service, not this panel, so it is not
+  // *不同* 端口是另一个本地服务，不是本面板，所以不信任。
   const origin = String(req.headers?.origin || "").trim();
   if (origin) {
     let originHost = "";
@@ -839,7 +838,7 @@ async function 刷新CLI版本() {
 // 从 OpenCode 上游网关自动发现。
 // 单飞：并发调用者共享一次进行中的抓取。
 // CLI 版本 feed 并行刷新（发射后不管），feed 慢不拖模型发现。
-// 5s feed never delays the model list.
+// 5 秒的 feed 绝不会拖慢模型清单。
 async function discoverModels() {
   if (发现进行中) return 发现进行中;
   发现进行中 = (async () => {
@@ -876,8 +875,8 @@ async function discoverModels() {
     // 目录加载后这个循环今天一个都不加：/models 给的每个 id 要么被目录
     // 描述过（已裁定）要么是评测条目。它为首次读目录前的窗口而存在，
     // 那时名字是唯一信号 —— 诚实说"还没数据"的桥，好过猜了
-    // /v1/models with an empty list for the first seconds after boot is worse
-    // 再在下一次刷新里自我纠正的桥。
+    // 再在下一次刷新里自我纠正的桥；启动头几秒用空清单
+    // 应答 /v1/models 更糟。
     for (const item of items) {
       const id = String(item.id || "");
       const lower = id.toLowerCase();
@@ -939,8 +938,8 @@ function normalizeModel(rawModel) {
 // deprecated，还有一个 `includes("muse")` 兜底 —— 针对已不存在
 // 的模型家族的名字规则。每个在线免费模型都走 chat 通道（目录：
 // `@ai-sdk/openai-compatible`），需要另一通道的模型从上游自己的
-// `ModelProtocolUnsupported` reply, which is a fact rather than a guess.
-// `RESPONSES_MODELS` still seeds the set when upstream ships a Responses-only
+// `ModelProtocolUnsupported` 应答，这是事实而非猜测。
+// 上游只发 Responses 时，`RESPONSES_MODELS` 仍会播种该集合。
 const responsesModelSet = new Set(
   (process.env.RESPONSES_MODELS || "")
     .split(",")
@@ -979,7 +978,7 @@ function markProtocolSupport(modelId, useResponses) {
   }
 }
 
-// --- Tool fingerprint (dynamic) -------------------------------------------
+// --- 工具指纹（动态） ---------------------------------------------------
 //
 // 上游 /inference/v1 校验请求体里的 `tools` 数组，这一层是变动最
 // 频繁的：起初数组必须存在，后来必须含特定工具名，再后来
@@ -987,17 +986,17 @@ function markProtocolSupport(modelId, useResponses) {
 // 都要改代码。
 //
 // 定义现在来自 identity.js，它在更新握手点名的发行版 commit SHA 处推导：
-//   1. source        — `read.ts` / `shell.ts` at that immutable commit
-//   2. DEFAULT_TOOLS — shipped fallback, used until a source read succeeds
+//   1. source        — 该不可变 commit 上的 `read.ts` / `shell.ts`
+//   2. DEFAULT_TOOLS — 随发行版兜底，直到源码读取成功前使用
 //
 // 下面的名字保留给早于该改动的调用点与测试；它们从实时 profile
 // 读取，不在加载时冻结。
 function 取指纹名(scope = null, modelId = null) {
   // 只留真正发往上游的名字。抓包带约 10 个工具，但发额外指纹会让
-  // `TOOL_PROFILE_SCOPE=core` sends a subset; treating the unsent ones as
+  // `TOOL_PROFILE_SCOPE=core` 只发子集；把未发送的工具当作
   // 无关的客户端工具被改名（`glob` → `glob_client`），毫无理由。
   // 模型也有影响：发行版对 GPT 系用 `patch` 换 `edit`+`write`。
-  // `patch` on GPT models, so the fingerprint set follows the same rule.
+  // `patch` 用于 GPT 模型，所以指纹集合遵循同一规则。
   return identity.getToolList(false, scope, modelId).map((t) => t.function.name);
 }
 
@@ -1085,9 +1084,8 @@ function 取工具名(tool) {
 // 仅仅是名字就会让上游回 429 FreeUsageLimitError 的客户端工具。
 // 2026-11-03 对线上网关实测，其余全过的请求里：叫 `run_code` 的
 // 工具被拒，同一 schema 换个名字就过。拒绝消息带的是配额措辞，
-// `run-code`, `runcode`, `run_program` or `code_exec` answers 200, and
-// `run_code_client` is refused too, so the match is on the substring. The
-// 看起来像额度耗尽；它其实是名字过滤器。`prepareToolsWithFingerprint`
+// `run-code`、`runcode`、`run_program` 或 `code_exec` 都答 200，
+// `run_code_client` 也被拒，所以匹配的是子串。
 // 看起来像额度耗尽；它其实是名字过滤器。`prepareToolsWithFingerprint`
 // 出站改名、回程恢复客户端的名字。
 const BLOCKED_TOOL_NAME_PATTERNS = [/run_code/i];
@@ -1362,8 +1360,8 @@ function 变换为Responses输入(messages = [], originalToAlias = null) {
  * `429 FreeUsageLimitError`，与额度耗尽的消息逐字节相同。
  * 触发条件是带 `Working directory:` 行的 `<env>` 块，不是提示长度
  * 也不是模型：12 KB 通用提示被拒，65 字节的块让 big-pickle 与
- * `<env>Working directory: /tmp</env>` is accepted, and the same split holds
- * mimo 通过。形态问题曾被当成配额问题 —— 同一分钟里
+ * `<env>Working directory: /tmp</env>` 通过，同样的分界也适用于
+ * mimo。形态问题曾被当成配额问题 —— 同一分钟里
  * CLI 能答而桥不能。
  *
  * CLI 用它自己的会话上下文构造此块，这里给的是桥的如实等价物：
@@ -1371,7 +1369,7 @@ function 变换为Responses输入(messages = [], originalToAlias = null) {
  * 请求在该网关上与 CLI 无法区分的关键。
  *
  * 按工作目录缓存：进程运行期间这些值不会变，实测 2.5 ms，
- * (the gateway never chdir's), and probing them costs a `git` subprocess —
+ * （网关从不 chdir），而探测它们要花一个 `git` 子进程 ——
  * 对每个请求都是真金白银。
  */
 let 环境块缓存 = { cwd: null, block: "" };
@@ -1407,7 +1405,7 @@ function 构建环境块() {
 /**
  * 把 harness 环境块附到系统提示，除非客户端已带。
  * 转发 CLI 自身提示的客户端（或任何带该块的提示）保留原样；
- * `<env>` block) keeps it verbatim — only the missing anchor is added.
+ * `<env>` 块）逐字节保留 —— 只补上缺失的锚点。
  */
 function 带环境块(systemText) {
   const text = typeof systemText === "string" ? systemText : "";
@@ -1529,7 +1527,7 @@ function buildUpstreamPayload(body, targetModel, useResponses, scope = null) {
   }
 
   // 字段名与顺序对齐 CLI 自己的请求：`max_completion_tokens`
-  // (not the legacy `max_tokens`), `store: false`, and `tools` before `stream`.
+  // （不是旧的 `max_tokens`）、`store: false`，且 `tools` 在 `stream` 之前。
   // 上游今天两种拼写都收，但发 CLI 的精确形状消除一个
   // 零成本可消除的差异。
   const upstreamBody = {
@@ -1588,9 +1586,9 @@ function 重造会话标识(req, body, staleId) {
  * CLI 在此 checkout 里会发送的项目 id。
  *
  * 对真 CLI 抓包实测：该头等于 git remote 的主机名/路径，
- * `sha1("git-remote:github.com/<owner>/<repo>")` — the remote URL with scheme
- * 去掉 `.git`。无 remote 时 CLI 哈希目录路径；显式头覆盖两者。
- * (`sha1("directory:<abs path>")`), and an `opencode` file in the directory
+ * `sha1("git-remote:github.com/<owner>/<repo>")` —— remote URL 去掉
+ * 协议、去掉 `.git`。无 remote 时 CLI 哈希目录路径；显式头覆盖两者。
+ * （`sha1("directory:<abs path>")`），而目录里的 `opencode` 文件
  * 推导一次并缓存：checkout 不会移动。
  */
 let 缓存项目标识 = null;
@@ -1647,8 +1645,8 @@ function buildUpstreamHeaders(req, sessionId) {
   const downstreamUa = req?.headers?.["user-agent"] || "";
   const ua = isValidV2UserAgent(downstreamUa) ? downstreamUa : 网关安全UA();
   const client = req?.headers?.["x-opencode-client"];
-  // `x-opencode-project` is not a constant: the CLI derives it as
-  // `sha1("git-remote:" + host + path)` for a repo, `sha1("directory:" + path)`
+  // `x-opencode-project` 不是常量：CLI 对仓库推导为
+  // `sha1("git-remote:" + host + path)`，对目录推导为 `sha1("directory:" + path)`，
   // 否则取目录里 `opencode` 文件的内容。发字面量 "global" 是 CLI
   // 从不产生的形状，所以按同样方式推导 —— 从本桥自己的 checkout。
   // 客户端自带该头仍然优先。
@@ -1689,7 +1687,7 @@ function 构建追踪头() {
 
 /**
  * 上游可以先回 HTTP 200，然后在流*内*报告失败。不处理的话，
- * (`data: {"error":{...}}`, e.g. "Streaming response failed: [503] ...").
+ * （`data: {"error":{...}}`，例如 "Streaming response failed: [503] ..."）。
  * 非流式客户端会拿到 200 + `content: null` + `finish_reason:
  * "stop"` —— 假成功。事件为 error 时返回错误文本，否则 null。
  */
@@ -1882,8 +1880,8 @@ function getPersistentSessionId(req, body) {
 }
 
 /**
- * `/api/proxy` — read and change the egress proxy; `/api/proxy/test` — prove a
- * 的候选拨号到上游之后才被信任。
+ * `/api/proxy` —— 读取并更改出口代理；`/api/proxy/test` —— 证明
+ * 候选能拨到上游，之后才被信任。
  *
  * 面板是唯一调用方，所以契约保持很小：JSON 进、JSON 出、一个错误
  * 字段。凭据写入时接受、读取时绝不回显。
@@ -2082,7 +2080,7 @@ function readRequestBody(req, maxBytes = MAX_BODY_BYTES) {
   });
 }
 
-// --- HTTP Server ---
+// --- HTTP 服务器 ---
 function 处理请求(req, res) {
   处理请求主体(req, res).catch((err) => {
     if (res.headersSent) return res.destroy();
@@ -2283,8 +2281,8 @@ async function 处理请求主体(req, res) {
         return res.end(JSON.stringify({ error: "Content-Type harus application/json." }));
       }
     }
-    // `处理代理API` is async; an unexpected throw must become a 500 instead
-    // 的未处理 rejection —— 它会让 socket 挂着。
+    // `处理代理API` 是异步的；意外抛出必须变成 500，而不是
+    // 未处理 rejection —— 它会让 socket 挂着。
     处理代理API(req, res, pathname).catch((err) => {
       if (res.headersSent) return res.destroy();
       res.writeHead(500, { "Content-Type": "application/json", "Cache-Control": "no-store" });
@@ -2563,7 +2561,6 @@ async function 处理请求主体(req, res) {
 
         // 每个客户端请求一个出口。下面的一切 —— 协议通道重试、端点迁移
         // 重试、5xx 重试、网关重试 —— 都复用它，因为上游把重试绑在
-        // — reuses it, because upstream ties a retry to the address that saw the
         // 见过首次尝试的地址上。只有两件事会换它：代理不可达（请求
         // 根本没出去）和网关拒绝且点名该出口是问题。两者都在发生处
         // 处理并更新此状态。
@@ -2638,8 +2635,8 @@ async function 处理请求主体(req, res) {
           } catch {}
           consumedErrorText = moveText;
           // 410 也可能是关于*模型*而非路由：换 URL 只会重复同样的模型级
-          // (`{"error":{"type":"ModelDeprecated"}}`). Retrying such a request at
-          // 回答，所以端点自愈只在错误未点名模型时适用。
+          // （`{"error":{"type":"ModelDeprecated"}}`）回答，
+          // 所以端点自愈只在错误未点名模型时适用。
           let moveErrType = "";
           try {
             const j = JSON.parse(moveText);
@@ -2739,7 +2736,6 @@ async function 处理请求主体(req, res) {
         }
 
         // 自愈身份。网关拒绝靠错误*体*识别，不在状态行：403 只有在其
-        // *body*, not the status line: a 403 is only the gate when its type or
         // type 或消息这么说时才是网关，而 426 本身就是版本下限握手。
         // 所以必须先读体再决策 —— 在这里传空字符串曾让 403 的分支不可达。
         if (!upstreamRes.ok) {
@@ -2844,7 +2840,7 @@ async function 处理请求主体(req, res) {
             上次失败网关重试纪元 === currentEpoch;
 
           if (!skipCooldownRetry) {
-            // (or none) `pick()` hands back the same egress and this is a no-op.
+            // 重试时换出口；只有一个代理（或没有）时，`pick()` 返回同一出口，这里是空操作。
             const pooled = proxy.describe().pool;
             const canFailover = pooled && pooled.active && pooled.enabled > 1;
             if (canFailover && egressState.egressUrl) {

@@ -489,8 +489,8 @@ function 挑选出口({ exclude = null, now = Date.now() } = {}) {
     return { url: 当前单代理.url, id: null, label: null, source: 当前单代理.url ? "single" : "direct", cooling: false };
   }
 
-  // `null` means "no preference", which must not be confused with the direct
-  // entry's empty URL — both would map to the same 健康表 key.
+  // `null` 表示"无偏好"，不能与直连条目的空 URL 混淆 —— 两者会映射到同一个
+  // 健康表键。
   const excluded = exclude === null || exclude === undefined ? null : 出口键(exclude);
   let candidates = excluded === null ? entries.slice() : entries.filter((e) => 出口键(e.url) !== excluded);
   if (candidates.length === 0) candidates = entries.slice();

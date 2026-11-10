@@ -70,7 +70,7 @@ function Anthropic思考到力度(thinking) {
   return "low";
 }
 
-/** Anthropic messages → OpenAI messages。
+/** Anthropic 消息 → OpenAI 消息。
  *  返回 { messages, systemText }：system 提出来单独传，兼容两个上游通道。 */
 function AnthropicToOpenAI(anthropicBody = {}) {
   const systemText = 提取Anthropic系统(anthropicBody.system);
@@ -129,7 +129,7 @@ function AnthropicToOpenAI(anthropicBody = {}) {
   return { messages, systemText };
 }
 
-/** Anthropic tools → OpenAI tools。input_schema 即 JSON Schema。 */
+/** Anthropic 工具 → OpenAI 工具。input_schema 即 JSON Schema。 */
 function Anthropic工具到OpenAI(tools) {
   if (!Array.isArray(tools)) return undefined;
   return tools.map((工具) => ({
@@ -142,7 +142,7 @@ function Anthropic工具到OpenAI(tools) {
   }));
 }
 
-/** OpenAI tool_calls → Anthropic tool_use 块。 */
+/** OpenAI 的 tool_calls → Anthropic 的 tool_use 块。 */
 function OpenAI工具到Anthropic(toolCalls) {
   return toolCalls.map((调用) => ({
     type: "tool_use",
@@ -152,7 +152,7 @@ function OpenAI工具到Anthropic(toolCalls) {
   }));
 }
 
-/** Anthropic tool_choice → OpenAI tool_choice。 */
+/** Anthropic 的 tool_choice → OpenAI 的 tool_choice。 */
 function Anthropic选择到OpenAI(choice) {
   if (!choice) return undefined;
   if (choice.type === "auto") return "auto";
@@ -161,7 +161,7 @@ function Anthropic选择到OpenAI(choice) {
   return undefined;
 }
 
-/** stop_sequences → stop。 */
+/** stop_sequences 转为 stop。 */
 function Anthropic停止到OpenAI(anthropicBody) {
   const seq = anthropicBody.stop_sequences;
   if (Array.isArray(seq) && seq.length > 0) return seq;
@@ -196,7 +196,7 @@ function OpenAI完成到Anthropic(oai, anthropicModel) {
   };
 }
 
-/** OpenAI finish_reason → Anthropic stop_reason。 */
+/** OpenAI 的 finish_reason → Anthropic 的 stop_reason。 */
 function 停止原因到Anthropic(finish, toolCalls) {
   if (Array.isArray(toolCalls) && toolCalls.length > 0) return "tool_use";
   switch (finish) {
@@ -253,7 +253,7 @@ function Anthropic请求转OpenAI(anthropicBody = {}, modelOverride = null) {
 // Responses API（客户端侧）：/v1/responses 进，OpenAI chat 出。
 // ---------------------------------------------------------------------------
 
-/** Responses input → OpenAI messages。支持 string 与 item 数组。 */
+/** Responses 输入 → OpenAI 消息。支持 string 与 item 数组。 */
 function Responses输入转Messages(input) {
   const messages = [];
   if (typeof input === "string") {
@@ -299,7 +299,7 @@ function Responses输入转Messages(input) {
   return messages;
 }
 
-/** Responses tools（flatten JSON schema）→ OpenAI tools。 */
+/** Responses 工具（扁平化 JSON schema）→ OpenAI 工具。 */
 function Responses工具转OpenAI(tools) {
   if (!Array.isArray(tools)) return undefined;
   return tools
