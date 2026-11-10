@@ -2,7 +2,7 @@
   <img src="panel-avatar.png" alt="Fucking Opencode" width="160">
 </p>
 
-<h1 align="center">Fucking Opencode 0.2.0</h1>
+<h1 align="center">Fucking Opencode 0.1.2</h1>
 
 <p align="center">
   OpenAI-, Anthropic-, and Responses-compatible gateway for OpenCode free-tier models,<br>
@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.2.0-blue" alt="Version 0.2.0">
+  <img src="https://img.shields.io/badge/version-0.1.2-blue" alt="Version 0.1.2">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="MIT license"></a>
   <img src="https://img.shields.io/badge/runtime-Bun-black" alt="Bun runtime">
   <img src="https://img.shields.io/badge/dependencies-0-informational" alt="Zero dependencies">
@@ -67,16 +67,16 @@ step) with a matching `.sha256` file:
 
 | Platform | Archive |
 | --- | --- |
-| Linux x86_64 | `fucking-opencode_v0.2.0_linux_amd64.tar.gz` |
-| Linux arm64 | `fucking-opencode_v0.2.0_linux_arm64.tar.gz` |
-| macOS Intel | `fucking-opencode_v0.2.0_darwin_amd64.tar.gz` |
-| macOS Apple silicon | `fucking-opencode_v0.2.0_darwin_arm64.tar.gz` |
-| Windows x86_64 | `fucking-opencode_v0.2.0_windows_amd64.zip` |
-| Windows arm64 | `fucking-opencode_v0.2.0_windows_arm64.zip` |
+| Linux x86_64 | `fucking-opencode_v0.1.2_linux_amd64.tar.gz` |
+| Linux arm64 | `fucking-opencode_v0.1.2_linux_arm64.tar.gz` |
+| macOS Intel | `fucking-opencode_v0.1.2_darwin_amd64.tar.gz` |
+| macOS Apple silicon | `fucking-opencode_v0.1.2_darwin_arm64.tar.gz` |
+| Windows x86_64 | `fucking-opencode_v0.1.2_windows_amd64.zip` |
+| Windows arm64 | `fucking-opencode_v0.1.2_windows_arm64.zip` |
 
 ```bash
-tar -xzf fucking-opencode_v0.2.0_linux_amd64.tar.gz
-cd fucking-opencode-0.2.0
+tar -xzf fucking-opencode_v0.1.2_linux_amd64.tar.gz
+cd fucking-opencode-0.1.2
 ./fucking-opencode          # or: bun server.js
 ```
 

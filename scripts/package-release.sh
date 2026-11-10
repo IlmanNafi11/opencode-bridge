@@ -49,7 +49,7 @@ build_unix() {
   local arch="$1"
   local os="$2"
   local pkg="$OUT/${NAME}_v${VERSION}_${os}_${arch}.tar.gz"
-  tar -C "$OUT" -czf "$pkg" "$NAME-$VERSION"
+  ( cd "$OUT" && tar -czf "$(basename "$pkg")" "$NAME-$VERSION" )
   ( cd "$OUT" && sha256sum "$(basename "$pkg")" > "$(basename "$pkg").sha256" )
   echo "built $(basename "$pkg")"
 }

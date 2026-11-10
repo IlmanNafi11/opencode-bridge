@@ -2853,6 +2853,7 @@ function renderPanel(description, { version = "", port = "", authRequired = fals
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
 <title>概览 · Fucking Opencode ${version}</title>
+<link rel="icon" type="image/png" href="/panel-avatar.png">
 <style>${STYLE}</style>
 </head>
 <body data-auth-required="${authRequired ? "true" : "false"}" data-panel-key="${escapeHtml(apiKey)}" data-version="${version}">
@@ -3581,6 +3582,7 @@ function renderLogin({ version = "", port = "" } = {}) {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
 <title>Masuk · Fucking Opencode ${version}</title>
+<link rel="icon" type="image/png" href="/panel-avatar.png">
 <style>${STYLE}</style>
 </head>
 <body>

@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.2.0] — 2026-11-11
+## [0.1.2] — 2026-11-11
 
 Multi-key credentials, an optional admin port, and a movable usage ledger.
 
@@ -39,6 +39,9 @@ Multi-key credentials, an optional admin port, and a movable usage ledger.
 - Release packaging and the installer fetch list now ship the new runtime
   modules (`config.js`, `model-groups.js`, `socks-bridge.js`, `warp.js`,
   `compat.js`), so installed hosts receive them through both update paths.
+- Favicon: the panel and login pages link `/panel-avatar.png`, `GET /favicon.ico`
+  serves the same bytes before auth, and the avatar ships through both the
+  installer and the self-updater.
 
 Anthropic and Responses protocols, usage history, opt-in API keys.
 

@@ -344,6 +344,7 @@ const UPDATE_FILES = [
   "stats.js",
   "egress-proxy.js",
   "server.js",
+  "panel-avatar.png",
   "THIRD_PARTY_NOTICES.md",
 ];
 let updateInFlight = null;
@@ -2212,6 +2213,7 @@ async function 处理请求主体(req, res) {
     pathname === "" ||
     pathname === "/" ||
     pathname === "/panel-avatar.png" ||
+    pathname === "/favicon.ico" ||
     pathname.startsWith("/api/");
   const 管理请求 = req.__adminPort === true;
   if (分离管理端口 && !管理请求 && 面板路径) {
@@ -2233,8 +2235,7 @@ async function 处理请求主体(req, res) {
     }
   }
 
-  // 登录页头像。放在门禁之前：登录页本身需要它。
-  if ((req.method === "GET" || req.method === "HEAD") && pathname === "/panel-avatar.png") {
+  if ((req.method === "GET" || req.method === "HEAD") && (pathname === "/panel-avatar.png" || pathname === "/favicon.ico")) {
     try {
       const bytes = require("fs").readFileSync(require("path").join(__dirname, "panel-avatar.png"));
       res.writeHead(200, {
