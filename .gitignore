@@ -1,0 +1,17 @@
+node_modules/
+*.log
+.env
+gateway-log.txt
+gateway-err.txt
+gateway-out.log
+gateway-out-err.log
+panel-password.txt
+fucking-opencode-log.txt
+fucking-opencode-err.txt
+fucking-opencode-out.log
+fucking-opencode-out-err.log
+
+bridge-err.txt
+bridge-log.txt
+bridge-out.log
+bridge-out-err.log

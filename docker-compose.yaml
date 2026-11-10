@@ -1,0 +1,42 @@
+services:
+  fucking-opencode:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      PORT: "20134"
+      HOST: "0.0.0.0"
+      OPENCODE_CACHE_DIR: /data/cache
+      # 面板会把出站代理写在这里。没有它，每次 `docker compose up -d`
+      # 重建时该设置都会丢失（容器文件系统是临时的）。
+      FUCKING_OPENCODE_STATE_DIR: /data/state
+      # 镜像是部署单元：就地自更新会在下一次 `docker compose build` 时被
+      # 撤销。请改用
+      # `docker compose build --pull && docker compose up -d` 升级。
+      AUTO_UPDATE: "0"
+    volumes:
+      - fucking-opencode-cache:/data/cache
+      - fucking-opencode-state:/data/state
+    # 仅限回环地址。gateway 没有身份验证（API key 字面值就是 "public"），
+    # 因此发布到 0.0.0.0 会把一个开放中继暴露给整个网络。
+    ports:
+      - "127.0.0.1:20134:20134"
+    healthcheck:
+      test:
+        - CMD
+        - bun
+        - -e
+        - "fetch('http://127.0.0.1:'+(process.env.PORT||'20134')+'/health').then(r => { if (!r.ok) process.exit(1) }).catch(() => process.exit(1))"
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+volumes:
+  fucking-opencode-cache:
+  fucking-opencode-state:
