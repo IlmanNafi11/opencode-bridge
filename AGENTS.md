@@ -99,11 +99,31 @@ curl -s http://127.0.0.1:20134/v1/chat/completions \
 
 设置 `PANEL_PASSWORD`（或将其放入 `start-fucking-opencode.cmd` 旁边的 `panel-password.txt`，该文件被 git 忽略并由启动器读取），以要求先建立会话，`/` 才会提供面板。设置后，没有 `ofb_panel` cookie 时，`/api/proxy*` 和 `/api/stats|history*` 会返回 `401`；`/health` 和 `/v1/*` 保持开放。会话在内存中保留 12 小时（`PANEL_SESSION_TTL_MS`），登录尝试在每 IP 10 分钟内失败 10 次后会被限流。面板语言默认为 `id`，可在顶栏切换为中文或 EN。
 
+### 管理端口（可选）
+
+设 `ADMIN_PORT`（且不同于 `PORT`）后，面板与 `/api/*` 只在管理端口提供，监听地址由 `ADMIN_BIND`（默认 `HOST`）决定。API 端口访问 `/` 会 302 到管理端口，访问其他面板路由返回 `404 admin_port_only`；管理端口拒绝 `/v1/*` 推理（`404 api_port_only`），但保留 `/health` 与 `/v1/models`。不设或设为 `0` 时行为不变。两个网关共用状态目录时，可用 `FUCKING_OPENCODE_USAGE_FILE` 把 `usage.jsonl` 指向不同文件。
+
+### 运行时配置（config.json）
+
+`<状态目录>/config.json`（可用 `FUCKING_OPENCODE_CONFIG` 改路径）支持 `defaultModel`（字符串）、`upstreamTimeoutMs`（1000–600000）、`maxBodyBytes`（1024–104857600）、`autoUpdate`（布尔）、`modelGroups`（别名 → 有序模型数组，最多 20 个）。优先级为环境变量 > 文件 > 内置默认值。改文件后约一秒内生效，无需重启；非法值被拒绝，上一份有效配置继续服务。`GET /api/config`（需面板会话）返回生效值、来源与最近的解析错误。
+
+模型组别名先走第一个候选；在未向客户端写出任何字节前遇到 `404`/`410`/`429`/`5xx` 就切下一个。失败模型记入 `<状态目录>/model-health.json` 冷却（`404` 5 分钟、`429` 1 分钟、`5xx` 30 秒），后续请求跳过直到冷却结束。可用 `FUCKING_OPENCODE_MODEL_GROUPS`（JSON）临时覆盖组定义，优先级高于文件。
+
+### WARP 管理（可选）
+
+`WARP_MANAGE=1` 才启用面板的 WARP 卡片与 `GET|POST /api/warp`。网关只驱动
+宿主机已安装的 `warp-cli`（`connect`/`disconnect`/`status`），不下载二进制、
+不写凭据。连接会改变整机路由，因此默认关闭；动作同样经过面板会话、
+`Host` 与 JSON Content-Type 门禁。没有该二进制时接口返回 `available: false`；
+容器通常无法访问宿主机 WARP 守护进程，请关闭或改在宿主机运行。
+
+零依赖例外：`warp.js` 只调用系统命令，不引入 npm 包。
+
 ### 出口代理（面板）
 
 `GET http://127.0.0.1:20134/` 提供 HTML 面板：输入 `http://[user:pass@]host:port`，按 *Simpan dan pakai*，之后所有出站请求（推理、模型发现、身份同步、自更新）都会经该代理隧道传输。*Uji koneksi* 会通过候选代理探测模型端点并报告出口 IP；*Matikan proxy* 返回直连出口。无需重启。
 
-- 仅支持 HTTP/HTTPS。SOCKS5 会被拒绝（Bun：`UnsupportedProxyProtocol`）。TLS 仍由 Bun 提供，因此 `transport-baseline.json` 保持有效。
+- 支持 HTTP/HTTPS 与 SOCKS5。SOCKS5 由 `socks-bridge.js` 在回环上开 HTTP CONNECT 入口，握手在本地完成；TLS 仍由 Bun 提供，因此 `transport-baseline.json` 保持有效。
 - 凭据持久化在 `~/.fucking-opencode/proxy.json`（权限 `0600`），面板、`/api/proxy` 或 `/health` 永远不会返回它们。
 - API：`GET /api/proxy`（状态）、`POST /api/proxy` `{"url":"…"}`（设置；`""` 清除）、
   `POST /api/proxy/test` `{"url":"…"}`（探测）。运维覆盖项：`UPSTREAM_PROXY_URL`，它会
@@ -194,7 +214,7 @@ Error: remote port forwarding failed for listen port 20136
 | 在 `install.sh` 期间发生端口冲突（`port 20134 is occupied by another process`） | 另一个非网关进程正在监听端口 20134 | 停止冲突进程，或安装到其他端口（`PORT=20130 bash install.sh`）。旧的 `fucking-opencode.service` 和网关自身的进程会被自动移除/替换。 |
 | 面板中已设置代理，但 `/health` 仍显示 `egress.mode: "direct"` | 该设置按请求读取；面板被锁定（`locked: true`）表示环境中的 `UPSTREAM_PROXY_URL` 拥有它 | 读取 `egress.proxy.source`（`file` / `env` / `none`）和 `egress.proxy.error`。要更改被环境锁定的代理，请编辑服务单元并重启。 |
 | *Uji koneksi* 报告代理返回 `403` | 代理隧道工作正常，但上游拒绝该出口 IP | 换一个代理；被拒绝的是 IP，不是请求形态。切换后运行 `bun verify.js --quick` 确认。 |
-| 面板拒绝 `socks5://…` | Bun fetch 仅支持 HTTP/HTTPS 代理，对 SOCKS 会抛出 `UnsupportedProxyProtocol` | 使用 `http://host:port`（Clash/v2ray 会暴露一个混合 HTTP 端口），或在本地 HTTP 代理中终止 SOCKS。 |
+| 面板设置 SOCKS5 后连接失败 | `socks5://` 由本地 `socks-bridge.js` 转成 HTTP CONNECT；握手失败或凭据错误会返回 502 | 先用 `curl --socks5 host:port https://www.cloudflare.com/cdn-cgi/trace` 验证 SOCKS 服务器本身；认证仅支持无认证或用户名/密码。 |
 
 ---
 
@@ -205,8 +225,12 @@ Error: remote port forwarding failed for listen port 20136
 | `server.js` | HTTP 服务器（`/` 处的面板、`/v1/chat/completions`、`/v1/models`、`/health`、带 `adminRequestError` CSRF/Host 防护的 `/api/proxy`）、Bun 运行时守卫、对 `proxy.js`/`panel.js` 的容错加载以及 `repairMissingModules()`，使半安装的树也能启动并自愈、可配置的 DNS 结果顺序（`DNS_RESULT_ORDER`）、会话亲和性缓存、客户端工具别名（`read` -> `read_client`）、SSE 流规范化（`reasoning_content`、`usage`、`finish_reason`）、带 30 秒 IP 冷却重试抑制（`GATE_RETRY_COOLDOWN_MS`）的 403/426/404 响应式重试循环、终止性 IP 滥用分支（`X-OpenCode-Gate: ip-abuse`，不刷新/重试）、出口代理（推理、发现和自更新时使用 `proxy.netFetch`）以及可选的 `UPSTREAM_RELAY_URL` 中继（`x-relay-target` / `x-relay-path`），还有 6 小时自更新器（`checkAndApplyUpdate`），它会暂存传入的 `server.js` 所需的任何模块，即使正在运行的 `UPDATE_FILES` 列表早于该模块。 |
 | `identity.js` | 自适应 OpenCode CLI 同步：发布握手（`opencode.ai/update/api`）、GitHub 源码获取器（`identifier.ts`、`session-id.ts`、`app.ts`、`model-request.ts`、`tool/plugin/*.ts`、`codemode/tool.ts`）、Effect Schema AST 解析器（`extractToolFromSource`）、提供方目录解析器与磁盘缓存（`~/.fucking-opencode/cache/catalog.json`）、30 秒强制刷新冷却（`GATE_REFRESH_COOLDOWN_MS`）、终止性 `isIpAbuseRejection` 守卫，以及池化 CSPRNG 会话 ID 生成器（`createSessionId`）。 |
 | `token-budget.js` | 加法式 token 预算计算（推理模型为 `max(requested, 1024) + 4096`，标准模型为 `max(requested, 512)`），由目录 `modelFacts` 驱动。 |
-| `proxy.js` | 出口：URL 校验（仅 HTTP/HTTPS，凭据需百分号编码）、在 `<state dir>/proxy.json`（权限 `0600`）中为单个代理和代理池持久化、带面板锁定的 `UPSTREAM_PROXY_URL`/`UPSTREAM_PROXY_POOL` 覆盖、按条目健康检查与指数冷却（`markFailure`/`markSuccess`/`pick`），持久化在 `<state dir>/pool-health.json`（权限 `0600`，以出口身份的截断 SHA-256 为键，因此绝不会重复代理凭据，通过重命名写入，拒绝立即生效 / 成功合并写入）、`withProxy`/`netFetch`（显式出口参数）供 `server.js` 和 `identity.js` 中的每次出站调用使用，以及 `testProxy`/`testPool`（上游探测 + `cdn-cgi/trace` 出口 IP）。 |
+| `proxy.js` | 出口：URL 校验（HTTP/HTTPS/SOCKS5，凭据需百分号编码）、在 `<state dir>/proxy.json`（权限 `0600`）中为单个代理和代理池持久化、带面板锁定的 `UPSTREAM_PROXY_URL`/`UPSTREAM_PROXY_POOL` 覆盖、按条目健康检查与指数冷却（`markFailure`/`markSuccess`/`pick`），持久化在 `<state dir>/pool-health.json`（权限 `0600`，以出口身份的截断 SHA-256 为键，因此绝不会重复代理凭据，通过重命名写入，拒绝立即生效 / 成功合并写入）、`withProxy`/`netFetch`（显式出口参数）供 `server.js` 和 `identity.js` 中的每次出站调用使用，以及 `testProxy`/`testPool`（上游探测 + `cdn-cgi/trace` 出口 IP）。 |
 | `egress-proxy.js` | 无依赖的 HTTP 代理，用于把主机变成代理池成员：CONNECT 加绝对 URI HTTP、可选的 `EGRESS_PROXY_TOKEN`（Basic，仅密码）、未认证的 `/healthz`。默认绑定回环地址；可达性由隧道负责。 |
+| `socks-bridge.js` | 把 `socks5://` 出口包装成回环 HTTP CONNECT 代理（无认证或用户名/密码），按 URL 复用，带连接/空闲超时与计数；TLS 仍由 Bun 发出。 |
+| `config.js` | 读取 `<状态目录>/config.json`（或 `FUCKING_OPENCODE_CONFIG`），优先级 env > 文件 > 默认值，按 mtime 热加载，校验非法值并保留上一份有效配置。 |
+| `model-groups.js` | 模型组别名解析与候选排序，失败模型按 `404`/`429`/`5xx` 冷却并持久化到 `<状态目录>/model-health.json`。 |
+| `warp.js` | 可选的 Cloudflare WARP 控制：探测 `warp-cli`，解析 `status`，执行 `connect`/`disconnect`；仅 `WARP_MANAGE=1` 时动作生效。 |
 | `panel.js` | 在 `/` 提供的 HTML 面板：同源表单，读写 `/api/proxy`，在不暴露凭据的情况下显示实时状态，并对每个配置值进行转义。 |
 | `transport-fingerprint.js` | 针对本地 TCP 监听器捕获运行时的原始 TLS `ClientHello` 字节，并将加密套件和扩展顺序与 `transport-baseline.json` 比较。 |
 | `gate-drill.js` | 端到端自愈演练套件（4 个在线演练 + 6 个确定性离线演练，包括 `full-corrupt`）。 |
@@ -225,3 +249,5 @@ bun test test/*.test.js
 bun transport-fingerprint.js --check
 bun gate-drill.js
 ```
+
+如果本机 `settings.json` 已配置 API key 或面板密码，演练会读到真实状态目录而返回 `401`。此时用空状态目录运行：`FUCKING_OPENCODE_STATE_DIR="$(mktemp -d)" bun gate-drill.js`。`session-shape` 出现 `429` 表示上游额度窗口已用尽，不是代码缺陷；等额度恢复后重跑。

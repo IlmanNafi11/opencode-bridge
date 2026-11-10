@@ -85,6 +85,16 @@ let compat = null;
 try { compat = require("./compat"); } catch { compat = null; }
 let 用量统计 = null;
 try { 用量统计 = require("./stats"); } catch { 用量统计 = null; }
+const runtimeConfig = require("./config");
+const 模型组 = require("./model-groups");
+// Cloudflare WARP 管理器：可选能力，缺失时接口如实返回不可用。
+const WARP_FALLBACK = {
+  状态: () => ({ enabled: false, available: false, error: "warp.js 未安装" }),
+  连接: () => ({ ok: false, error: "warp.js 未安装" }),
+  断开: () => ({ ok: false, error: "warp.js 未安装" }),
+  启用: () => false,
+};
+let warp = 加载本地模块("warp", WARP_FALLBACK);
 
 /**
  * 本服务按相对路径 require 的本地模块。自更新器用它拒绝会装出
@@ -122,7 +132,7 @@ async function repairMissingModules(dir = __dirname) {
   const fs = require("fs");
   const path = require("path");
   const required = new Set(本地require(fs.readFileSync(path.join(dir, "server.js"), "utf8")));
-  for (const name of ["proxy.js", "panel.js"]) required.add(name);
+  for (const name of ["proxy.js", "panel.js", "config.js", "model-groups.js", "socks-bridge.js", "warp.js", "compat.js"]) required.add(name);
   const missing = [...required].filter((f) => !fs.existsSync(path.join(dir, f)));
   const repaired = [];
   const failed = [];
@@ -162,8 +172,18 @@ async function repairMissingModules(dir = __dirname) {
 
 const PORT = parseInt(process.env.PORT || "20134", 10);
 const HOST = process.env.HOST || "127.0.0.1";
-const UPSTREAM_TIMEOUT_MS = parseInt(process.env.UPSTREAM_TIMEOUT_MS || "120000", 10);
-const MAX_BODY_BYTES = parseInt(process.env.MAX_BODY_BYTES || String(10 * 1024 * 1024), 10);
+// 管理端口：非 0 且不同于 PORT 时，面板与 /api/* 只在这个端口提供，
+// 主端口只剩 /v1/* 与 /health。0 表示沿用旧行为（同端口）。
+const ADMIN_PORT = parseInt(process.env.ADMIN_PORT || "0", 10);
+const ADMIN_BIND = process.env.ADMIN_BIND || HOST;
+const 分离管理端口 = ADMIN_PORT > 0 && ADMIN_PORT !== PORT;
+// 可热加载的运行时配置（env > config.json > 默认值），见 config.js。
+function 上游超时毫秒() {
+  return runtimeConfig.取("upstreamTimeoutMs");
+}
+function 请求体上限() {
+  return runtimeConfig.取("maxBodyBytes");
+}
 // 面板登录（可选）。设置 PANEL_PASSWORD 后，面板 HTML、/api/proxy* 与
 // /api/stats|history 都要求有效会话；/v1/*、/health 与 /api/login 不受影响。
 // 留空 = 保持旧行为（本地面板无需登录）。
@@ -214,19 +234,24 @@ const CORS_ORIGIN = process.env.CORS_ORIGIN !== undefined ? process.env.CORS_ORI
 // 时序安全比较，避免逐字符计时侧信道。
 // 客户端未给 model 时的默认模型。空 = 保持旧行为（400 model_required）。
 // 只在 /v1/chat/completions 生效；兼容路由本来就要求显式 model。
-const DEFAULT_MODEL = String(process.env.FUCKING_OPENCODE_DEFAULT_MODEL || "").trim();
+function 默认模型值() {
+  return runtimeConfig.取("defaultModel");
+}
 /** 接口密钥检查：返回 null（通过）或 401 响应体。 */
 function 检查API密钥(req) {
-  const expected = panelSettings.getApiKey();
-  if (!expected) return null;
+  if (!panelSettings.hasApiKeys()) return null;
   // 面板会话已用密码登录，测试台同源调用直接放行，避免在浏览器里暴露 API key。
-  if (panelPassword() && panelAuthorized(req)) return null;
+  if (panelPassword() && panelAuthorized(req)) {
+    req.__apiKeyLabel = "panel";
+    return null;
+  }
   const raw = req.headers?.authorization || "";
   const token = raw.startsWith("Bearer ") ? raw.slice(7).trim() : "";
   if (!token) return { error: { message: "缺少 API key：Authorization: Bearer <key>（服务端已启用密钥）", type: "authentication_error", code: "invalid_api_key" } };
-  return timingSafeEqualStr(token, expected)
-    ? null
-    : { error: { message: "API key 无效", type: "authentication_error", code: "invalid_api_key" } };
+  const matched = panelSettings.matchApiKey(token);
+  if (!matched) return { error: { message: "API key 无效", type: "authentication_error", code: "invalid_api_key" } };
+  req.__apiKeyLabel = matched.label;
+  return null;
 }
 /** 入站客户端地址：去掉 IPv6-mapped 前缀；只用于本机分面统计。 */
 function 客户端地址(req) {
@@ -236,10 +261,15 @@ function 客户端地址(req) {
 
 /** 用量记录的机器字段：供应商固定为 opencode，密钥标签只存机器值，面板再本地化。 */
 function 用量标签(req) {
+  const label = req && req.__apiKeyLabel
+    ? req.__apiKeyLabel
+    : panelSettings.hasApiKeys()
+      ? "unknown"
+      : "none";
   return {
     provider: "opencode",
     client_ip: 客户端地址(req),
-    key_label: panelSettings.getApiKey() ? "default" : "none",
+    key_label: label,
   };
 }
 
@@ -294,7 +324,6 @@ const UPDATE_HINT =
 const UPDATE_BASE_URL =
   process.env.OPENCODE_GATEWAY_UPDATE_BASE ||
   "https://raw.githubusercontent.com/ShinRyu04/Fucking-Opencode/main";
-const AUTO_UPDATE = process.env.AUTO_UPDATE !== "0" && process.env.AUTO_UPDATE !== "false";
 const UPDATE_FILES = [
   "package.json",
   "identity.js",
@@ -307,6 +336,12 @@ const UPDATE_FILES = [
   "proxy.js",
   "panel.js",
   "panel-settings.js",
+  "config.js",
+  "compat.js",
+  "model-groups.js",
+  "socks-bridge.js",
+  "warp.js",
+  "stats.js",
   "egress-proxy.js",
   "server.js",
   "THIRD_PARTY_NOTICES.md",
@@ -339,7 +374,7 @@ function 是更新版本(current, remote) {
  * UPDATE_CHECK_TTL_MS 一次。
  */
 async function 检查并应用更新() {
-  if (!AUTO_UPDATE) return { updated: false, reason: "disabled" };
+  if (!runtimeConfig.取("autoUpdate")) return { updated: false, reason: "disabled" };
   if (updateInFlight) return updateInFlight;
   if (Date.now() - 上次更新检查 < UPDATE_CHECK_TTL_MS) {
     return { updated: false, reason: "fresh" };
@@ -2016,7 +2051,51 @@ async function 处理代理API(req, res, pathname) {
   return send(400, { error: "请求体须含 'url'（单代理）或 'entries'（代理池）。" });
 }
 
-function readRequestBody(req, maxBytes = MAX_BODY_BYTES) {
+/**
+ * `/api/warp` —— 可选的 Cloudflare WARP 管理。默认关闭：连接/断开会改变
+ * 整机路由，所以只有 `WARP_MANAGE=1` 时才允许动作，且只驱动主机上已
+ * 安装的 `warp-cli`，不下载、不安装、不写凭据。
+ */
+async function 处理WARPAPI(req, res) {
+  const send = (status, body) => {
+    res.writeHead(status, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+    res.end(JSON.stringify(body));
+  };
+
+  if (req.method === "GET" || req.method === "HEAD") return send(200, warp.状态());
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "GET, POST");
+    return send(405, { error: "Gunakan GET untuk status atau POST untuk connect/disconnect." });
+  }
+  if (!warp.启用()) {
+    return send(409, { error: "WARP_MANAGE 未启用。重启服务前设置 WARP_MANAGE=1。", enabled: false });
+  }
+
+  let payload = {};
+  try {
+    const text = await readRequestBody(req, 4096);
+    payload = text ? JSON.parse(text) : {};
+  } catch (err) {
+    return send(err.statusCode === 413 ? 413 : 400, { error: `请求体无效：${err.message}` });
+  }
+  const action = payload && payload.action;
+  if (action !== "connect" && action !== "disconnect") {
+    return send(400, { error: "action 只能是 connect 或 disconnect。" });
+  }
+
+  const result = action === "connect" ? warp.连接() : warp.断开();
+  const 新状态 = warp.状态();
+  记录事件(`WARP ${action}：${result.ok ? "成功" : result.error || "失败"}`, result.ok ? "info" : "warn");
+  return send(result.ok ? 200 : 502, {
+    ok: result.ok,
+    action,
+    output: result.output || "",
+    error: result.error || null,
+    status: 新状态,
+  });
+}
+
+function readRequestBody(req, maxBytes = 请求体上限()) {
   // 提前拒绝：客户端声明巨大 body 时，一个字节都不读就拒绝，
   // 而不是先缓冲到上限。
   const declared = parseInt(req?.headers?.["content-length"] || "", 10);
@@ -2127,6 +2206,33 @@ async function 处理请求主体(req, res) {
   const rawPath = qIdx === -1 ? rawUrl : rawUrl.slice(0, qIdx);
   const pathname = rawPath.length > 1 && rawPath.endsWith("/") ? rawPath.replace(/\/+$/, "") : rawPath;
 
+  // 端口隔离：开启 ADMIN_PORT 后，面板与 /api/* 只接受来自管理端口的请求，
+  // 管理端口则拒绝推理路由，避免两个面混在同一个入口。
+  const 面板路径 =
+    pathname === "" ||
+    pathname === "/" ||
+    pathname === "/panel-avatar.png" ||
+    pathname.startsWith("/api/");
+  const 管理请求 = req.__adminPort === true;
+  if (分离管理端口 && !管理请求 && 面板路径) {
+    if ((req.method === "GET" || req.method === "HEAD") && pathname === "/") {
+      const 主机 = ADMIN_BIND === "0.0.0.0" || ADMIN_BIND === "::"
+        ? String(req.headers?.host || "").split(":")[0] || "127.0.0.1"
+        : ADMIN_BIND;
+      res.writeHead(302, { Location: `http://${主机}:${ADMIN_PORT}/`, "Cache-Control": "no-store" });
+      return res.end();
+    }
+    res.writeHead(404, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+    return res.end(JSON.stringify({ error: { message: "面板只监听管理端口 ADMIN_PORT。", type: "not_found", code: "admin_port_only" } }));
+  }
+  if (分离管理端口 && 管理请求) {
+    const 推理路由 = pathname.startsWith("/v1/") && pathname !== "/v1/models";
+    if (推理路由) {
+      res.writeHead(404, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+      return res.end(JSON.stringify({ error: { message: "管理端口不提供推理接口，请改用主端口。", type: "not_found", code: "api_port_only" } }));
+    }
+  }
+
   // 登录页头像。放在门禁之前：登录页本身需要它。
   if ((req.method === "GET" || req.method === "HEAD") && pathname === "/panel-avatar.png") {
     try {
@@ -2185,6 +2291,17 @@ async function 处理请求主体(req, res) {
     return res.end(JSON.stringify({ ok: true }));
   }
 
+  if (pathname === "/api/config" && req.method === "GET") {
+    const denied = adminRequestError(req);
+    if (denied) {
+      res.writeHead(403, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+      return res.end(JSON.stringify({ error: denied }));
+    }
+    if (!panelAuthorized(req)) return panelUnauthorized(res);
+    res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+    return res.end(JSON.stringify(runtimeConfig.快照()));
+  }
+
   if (pathname === "/api/settings") {
     const denied = adminRequestError(req);
     if (denied) {
@@ -2194,7 +2311,7 @@ async function 处理请求主体(req, res) {
     if (!panelAuthorized(req)) return panelUnauthorized(res);
     if (req.method === "GET") {
       res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
-      return res.end(JSON.stringify({ ...panelSettings.describe(), defaultModel: DEFAULT_MODEL || "" }));
+      return res.end(JSON.stringify({ ...panelSettings.describe(), defaultModel: 默认模型值() || "" }));
     }
     if (req.method === "POST") {
       const type = String(req.headers?.["content-type"] || "").split(";")[0].trim().toLowerCase();
@@ -2212,7 +2329,17 @@ async function 处理请求主体(req, res) {
       }
       let error = null;
       let passwordChanged = false;
-      if (payload.clearApiKey === true) {
+      if (payload.addApiKey && typeof payload.addApiKey === "object") {
+        const result = panelSettings.addApiKey(payload.addApiKey);
+        if (!result.ok) error = result.error;
+      } else if (payload.updateApiKey && typeof payload.updateApiKey === "object") {
+        const { id, label, enabled } = payload.updateApiKey;
+        const result = panelSettings.updateApiKey(String(id || ""), { label, enabled });
+        if (!result.ok) error = result.error;
+      } else if (typeof payload.deleteApiKey === "string") {
+        const result = panelSettings.deleteApiKey(payload.deleteApiKey);
+        if (!result.ok) error = result.error;
+      } else if (payload.clearApiKey === true) {
         const result = panelSettings.clearApiKey();
         if (!result.ok) error = result.error;
       } else if (typeof payload.apiKey === "string") {
@@ -2238,7 +2365,7 @@ async function 处理请求主体(req, res) {
         panelSetCookie(res);
       }
       res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
-      return res.end(JSON.stringify({ ok: true, ...panelSettings.describe(), defaultModel: DEFAULT_MODEL || "" }));
+      return res.end(JSON.stringify({ ok: true, ...panelSettings.describe(), defaultModel: 默认模型值() || "" }));
     }
     res.writeHead(405, { "Content-Type": "application/json", "Cache-Control": "no-store" });
     return res.end(JSON.stringify({ error: "Method not allowed." }));
@@ -2284,6 +2411,28 @@ async function 处理请求主体(req, res) {
     // `处理代理API` 是异步的；意外抛出必须变成 500，而不是
     // 未处理 rejection —— 它会让 socket 挂着。
     处理代理API(req, res, pathname).catch((err) => {
+      if (res.headersSent) return res.destroy();
+      res.writeHead(500, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+      res.end(JSON.stringify({ error: `Kesalahan internal: ${err.message}` }));
+    });
+    return;
+  }
+
+  if (pathname === "/api/warp") {
+    const denied = adminRequestError(req);
+    if (denied) {
+      res.writeHead(403, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+      return res.end(JSON.stringify({ error: denied }));
+    }
+    if (!panelAuthorized(req)) return panelUnauthorized(res);
+    if (req.method === "POST") {
+      const type = String(req.headers?.["content-type"] || "").split(";")[0].trim().toLowerCase();
+      if (type !== "application/json") {
+        res.writeHead(415, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+        return res.end(JSON.stringify({ error: "Content-Type harus application/json." }));
+      }
+    }
+    处理WARPAPI(req, res).catch((err) => {
       if (res.headersSent) return res.destroy();
       res.writeHead(500, { "Content-Type": "application/json", "Cache-Control": "no-store" });
       res.end(JSON.stringify({ error: `Kesalahan internal: ${err.message}` }));
@@ -2447,9 +2596,9 @@ async function 处理请求主体(req, res) {
         );
       }
 
-      // 默认模型：客户端没给 model 时用 FUCKING_OPENCODE_DEFAULT_MODEL。
-      if (!body.model && DEFAULT_MODEL) body.model = DEFAULT_MODEL;
-      const targetModel = normalizeModel(body.model);
+      // 默认模型：客户端没给 model 时用运行配置的 defaultModel。
+      if (!body.model && 默认模型值()) body.model = 默认模型值();
+      let targetModel = normalizeModel(body.model);
       if (!targetModel) {
         res.writeHead(400, { "Content-Type": "application/json" });
         return res.end(
@@ -2463,6 +2612,20 @@ async function 处理请求主体(req, res) {
           })
         );
       }
+
+      // 模型组：别名 → 有序候选。跳过目录明确判为非免费/退役的候选；
+      // 上游运行期失败再按 model-health 冷却继续往后切。
+      const 组候选 = 模型组.候选(targetModel);
+      let 候选列表 = 组候选.filter((模型) => {
+        const 判定 = identity.getCatalogVerdict(模型);
+        return !判定 || 判定 === "free";
+      });
+      if (候选列表.length === 0) 候选列表 = [...组候选];
+      if (候选列表.length > 1) {
+        console.log(`[fucking-opencode] 模型组 ${targetModel}：${候选列表.join(" → ")}`);
+      }
+      targetModel = 候选列表[0] || targetModel;
+      body.model = targetModel;
 
       // 仅免费档：本桥发 `Authorization: Bearer public`，无法认证任何其他
       // 东西，目录定价高于零的模型只会在上游失败。在这里说明 ——
@@ -2543,7 +2706,7 @@ async function 处理请求主体(req, res) {
       const timeoutId = setTimeout(() => {
         timedOut = true;
         abortController.abort(new Error("上游请求超时"));
-      }, UPSTREAM_TIMEOUT_MS);
+      }, 上游超时毫秒());
 
       const onClose = () => {
         if (!res.writableEnded) {
@@ -2554,26 +2717,34 @@ async function 处理请求主体(req, res) {
       res.on("close", onClose);
 
       let reader = null;
-      try {
+
+      // 每个客户端请求一个出口。模型回退共用同一出口 —— 上游把重试
+      // 绑在见过首次尝试的地址上；只有代理不可达或网关点名出口时才换。
+      const egressState = { egress: proxy.pick(), egressUrl: null, transportFailures: 0 };
+      egressState.egressUrl = egressState.egress.url;
+      egressStateRef = () => egressState.egress;
+      // 兼容路由自call 时从这里读出口标签。必须在任何 writeHead 之前 set。
+      if (统计) {
+        try { res.setHeader("X-Gateway-Egress", egressLabelForStats(egressState.egress)); } catch {}
+      }
+      const egressUrl = () => egressState.egressUrl;
+
+      let 当前候选 = 0;
+      模型尝试: for (; 当前候选 < 候选列表.length; 当前候选++) {
+        targetModel = 候选列表[当前候选];
+        useResponses = isResponsesModel(targetModel);
+        body.model = targetModel;
+        if (统计) 统计.model = targetModel;
         let { upstreamBody, aliasToOriginal } = buildUpstreamPayload(body, targetModel, useResponses);
         let liveEndpoints = 解析端点(targetModel);
         let upstreamUrl = useResponses ? liveEndpoints.responsesUrl : liveEndpoints.chatUrl;
+        // 可回退判定：还没到最后一个候选，且失败与模型/容量/上游有关。
+        const 可切换模型 = (状态) =>
+          当前候选 + 1 < 候选列表.length &&
+          [404, 410, 429, 500, 502, 503, 504].includes(状态);
 
-        // 每个客户端请求一个出口。下面的一切 —— 协议通道重试、端点迁移
-        // 重试、5xx 重试、网关重试 —— 都复用它，因为上游把重试绑在
-        // 见过首次尝试的地址上。只有两件事会换它：代理不可达（请求
-        // 根本没出去）和网关拒绝且点名该出口是问题。两者都在发生处
-        // 处理并更新此状态。
-        const egressState = { egress: proxy.pick(), egressUrl: null, transportFailures: 0 };
-        egressState.egressUrl = egressState.egress.url;
-        egressStateRef = () => egressState.egress;
-        // 兼容路由自call 时从这里读出口标签。必须在任何 writeHead 之前 set。
-        if (统计) {
-          try { res.setHeader("X-Gateway-Egress", egressLabelForStats(egressState.egress)); } catch {}
-        }
-        const egressUrl = () => egressState.egressUrl;
-
-        let upstreamRes = await 出口抓取(upstreamUrl, {
+        try {
+          let upstreamRes = await 出口抓取(upstreamUrl, {
           method: "POST",
           headers: upstreamHeaders,
           body: JSON.stringify(upstreamBody),
@@ -2808,6 +2979,13 @@ async function 处理请求主体(req, res) {
                   (cfPlacement ? ` [cf-placement: ${cfPlacement}]` : "")
               );
             }
+            if (可切换模型(upstreamRes.status)) {
+              模型组.记录失败(targetModel, upstreamRes.status);
+              console.warn(
+                `[fucking-opencode] 模型 ${targetModel} 返回 ${upstreamRes.status}；改试 ${候选列表[当前候选 + 1]}`
+              );
+              continue 模型尝试;
+            }
             const errHeaders = { "Content-Type": "application/json" };
             if (upstreamLogId) errHeaders["X-OpenCode-Log-Id"] = upstreamLogId;
             if (upstreamRes.status >= 500) errHeaders["X-OpenCode-Gate"] = "upstream-error";
@@ -2999,6 +3177,13 @@ async function 处理请求主体(req, res) {
               }）：${retryMsg} —— ${verdictText}` +
                 (upstreamLogId ? ` [x-opencode-log-id: ${upstreamLogId}]` : "")
             );
+            if (capacity && 可切换模型(retryStatus)) {
+              模型组.记录失败(targetModel, retryStatus);
+              console.warn(
+                `[fucking-opencode] 模型 ${targetModel} 容量耗尽（${retryStatus}）；改试 ${候选列表[当前候选 + 1]}`
+              );
+              continue 模型尝试;
+            }
             const outStatus = 解析限流状态(upstreamRes.status, retryFreeTierMsg && !capacity);
             res.writeHead(
               outStatus,
@@ -3026,6 +3211,7 @@ async function 处理请求主体(req, res) {
         // 这个出口承载了上游接受的请求，失败史已过期：清掉，
         // 下一次挑选把它当健康。
         proxy.markSuccess(egressState.egressUrl);
+        模型组.记录成功(targetModel);
         const completionId = `chatcmpl-${crypto.randomBytes(12).toString("hex")}`;
         const created = Math.floor(Date.now() / 1000);
         reader = upstreamRes.body.getReader();
@@ -3473,7 +3659,7 @@ async function 处理请求主体(req, res) {
             return res.end(
               JSON.stringify({
                 error: {
-                  message: `Upstream request timed out after ${UPSTREAM_TIMEOUT_MS}ms`,
+                  message: `Upstream request timed out after ${上游超时毫秒()}ms`,
                   type: "timeout_error",
                   code: 504,
                 },
@@ -3493,9 +3679,18 @@ async function 处理请求主体(req, res) {
           );
         }
         return res.end();
-      } finally {
-        clearTimeout(timeoutId);
-        res.off("close", onClose);
+      }
+      }
+      res.off("close", onClose);
+      clearTimeout(timeoutId);
+      if (!res.headersSent && !res.writableEnded) {
+        落盘统计(502, { error: "所有候选模型均失败" });
+        res.writeHead(502, { "Content-Type": "application/json" });
+        return res.end(
+          JSON.stringify({
+            error: { message: "所有候选模型均失败", type: "upstream_error", code: 502 },
+          })
+        );
       }
     })();
     return;
@@ -3529,6 +3724,21 @@ async function 处理请求主体(req, res) {
       return res.end(JSON.stringify({ error: 密钥拒绝.error }));
     }
     return 处理Responses请求(req, res);
+  }
+
+  // 诊断：按出口/模型的 429、5xx、连续成功，加上模型冷却与最近网关拒绝。
+  if (pathname === "/api/diagnostics" && req.method === "GET") {
+    if (!panelAuthorized(req)) return panelUnauthorized(res);
+    const 地址 = new URL(req.url, `http://${req.headers?.host || "127.0.0.1"}`);
+    const hours = Math.min(168, Math.max(1, Number(地址.searchParams.get("hours")) || 24));
+    const out = 用量统计 && 用量统计.诊断汇总
+      ? 用量统计.诊断汇总({ hours })
+      : { hours, total: 0, egress: [], models: [] };
+    out.cooldowns = 模型组.诊断();
+    out.gateway = 上次网关诊断 || null;
+    out.upstream_error = 上次上游错误 || null;
+    res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+    return res.end(JSON.stringify(out));
   }
 
   // 用量统计与请求历史（面板标签页的数据源）。
@@ -3586,7 +3796,7 @@ function 桥内自调用(oaiBody, reqId) {
       }
     );
     req.on("error", reject);
-    req.setTimeout(UPSTREAM_TIMEOUT_MS + 5000, () => req.destroy(new Error("上游请求超时")));
+    req.setTimeout(上游超时毫秒() + 5000, () => req.destroy(new Error("上游请求超时")));
     req.end(payload);
   });
 }
@@ -3852,7 +4062,17 @@ async function 消费SSE行(reader, decoder, onLine) {
   }
 }
 
-const server = http.createServer(处理请求);
+function 主端口处理器(req, res) {
+  处理请求(req, res);
+}
+
+function 管理端口处理器(req, res) {
+  req.__adminPort = true;
+  处理请求(req, res);
+}
+
+const server = http.createServer(主端口处理器);
+let adminServer = null;
 
 // 只在直接执行（`node server.js`）时自动启动，单元测试可以
 // require("./server") 而不绑默认端口、不起定时器。
@@ -3898,6 +4118,16 @@ if (require.main === module) {
       );
     }
   });
+  if (分离管理端口) {
+    adminServer = http.createServer(管理端口处理器);
+    adminServer.on("error", (err) => {
+      console.error(`[fucking-opencode] 管理端口 ${ADMIN_PORT} 启动失败：${err.message}`);
+      process.exit(1);
+    });
+    adminServer.listen(ADMIN_PORT, ADMIN_BIND, () => {
+      console.log(`[fucking-opencode] 管理面板已监听 http://${ADMIN_BIND}:${ADMIN_PORT}`);
+    });
+  }
   // socket 打开后修复半安装的树（不知道 proxy.js/panel.js 的旧自更新器），
   // 网络慢或缺席绝不拖慢启动。面板逐请求读当前绑定，
   // 修复一落地就能用。

@@ -2,7 +2,7 @@
   <img src="panel-avatar.png" alt="Fucking Opencode" width="160">
 </p>
 
-<h1 align="center">Fucking Opencode 0.1.1</h1>
+<h1 align="center">Fucking Opencode 0.2.0</h1>
 
 <p align="center">
   OpenAI-, Anthropic-, and Responses-compatible gateway for OpenCode free-tier models,<br>
@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.1.1-blue" alt="Version 0.1.1">
+  <img src="https://img.shields.io/badge/version-0.2.0-blue" alt="Version 0.2.0">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="MIT license"></a>
   <img src="https://img.shields.io/badge/runtime-Bun-black" alt="Bun runtime">
   <img src="https://img.shields.io/badge/dependencies-0-informational" alt="Zero dependencies">
@@ -67,16 +67,16 @@ step) with a matching `.sha256` file:
 
 | Platform | Archive |
 | --- | --- |
-| Linux x86_64 | `fucking-opencode_v0.1.1_linux_amd64.tar.gz` |
-| Linux arm64 | `fucking-opencode_v0.1.1_linux_arm64.tar.gz` |
-| macOS Intel | `fucking-opencode_v0.1.1_darwin_amd64.tar.gz` |
-| macOS Apple silicon | `fucking-opencode_v0.1.1_darwin_arm64.tar.gz` |
-| Windows x86_64 | `fucking-opencode_v0.1.1_windows_amd64.zip` |
-| Windows arm64 | `fucking-opencode_v0.1.1_windows_arm64.zip` |
+| Linux x86_64 | `fucking-opencode_v0.2.0_linux_amd64.tar.gz` |
+| Linux arm64 | `fucking-opencode_v0.2.0_linux_arm64.tar.gz` |
+| macOS Intel | `fucking-opencode_v0.2.0_darwin_amd64.tar.gz` |
+| macOS Apple silicon | `fucking-opencode_v0.2.0_darwin_arm64.tar.gz` |
+| Windows x86_64 | `fucking-opencode_v0.2.0_windows_amd64.zip` |
+| Windows arm64 | `fucking-opencode_v0.2.0_windows_arm64.zip` |
 
 ```bash
-tar -xzf fucking-opencode_v0.1.1_linux_amd64.tar.gz
-cd fucking-opencode-0.1.1
+tar -xzf fucking-opencode_v0.2.0_linux_amd64.tar.gz
+cd fucking-opencode-0.2.0
 ./fucking-opencode          # or: bun server.js
 ```
 
@@ -190,11 +190,14 @@ docker run -d --name fucking-opencode \
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `PORT` / `HOST` | `20134` / `127.0.0.1` | Listen address; keep loopback unless fronted by auth |
+| `ADMIN_PORT` / `ADMIN_BIND` | `0` / `HOST` | Serve the panel and `/api/*` on a separate port; inference stays on `PORT` |
 | `PANEL_PASSWORD` | *(empty)* | Fallback panel password when `settings.json` has none |
 | `PANEL_ALLOWED_HOSTS` | *(empty)* | Extra `Host` names accepted by the panel and admin APIs |
-| `FUCKING_OPENCODE_API_KEYS` | *(empty)* | Comma-separated fallback API keys; the first is used |
+| `FUCKING_OPENCODE_API_KEYS` | *(empty)* | Comma-separated fallback API keys; every listed key is accepted |
 | `FUCKING_OPENCODE_DEFAULT_MODEL` | *(empty)* | Model used when a chat request omits `model` |
 | `FUCKING_OPENCODE_STATE_DIR` | `~/.fucking-opencode` | Settings, proxy, pool health, usage, history |
+| `FUCKING_OPENCODE_USAGE_FILE` | `<state>/usage.jsonl` | Override the usage ledger path (absolute or relative to state dir) |
+| `FUCKING_OPENCODE_CONFIG` | `<state>/config.json` | Runtime config file, hot-reloaded on change |
 | `OPENCODE_CACHE_DIR` | `<state>/cache` | Catalog cache (`off` disables disk caching) |
 | `CORS_ORIGIN` | *(empty, localhost)* | Allowed CORS origins, comma-separated or `*` |
 | `UPSTREAM_TIMEOUT_MS` | `120000` | Upstream fetch deadline |
@@ -216,10 +219,40 @@ docker run -d --name fucking-opencode \
 | `UPSTREAM_PROXY_POOL` | *(unset)* | Lock egress to a pool, comma- or newline-separated |
 | `UPSTREAM_PROXY_STRATEGY` | `round-robin` | `round-robin`, `failover`, or `random` |
 | `AUTO_UPDATE` | `1` | Check for updates every six hours; skipped inside a git checkout |
+| `WARP_MANAGE` | `0` | `1` enables the optional `/api/warp` connect/disconnect controls for a host-installed `warp-cli` |
 | `ALLOW_NODE` | *(unset)* | Bypass the Bun guard for offline tests only |
 
 Changing a credential or proxy in the panel applies immediately. Other
 environment changes require a restart.
+
+`config.json` (path overridable with `FUCKING_OPENCODE_CONFIG`) accepts
+`defaultModel` (string), `upstreamTimeoutMs` (1000–600000),
+`maxBodyBytes` (1024–104857600), `autoUpdate` (boolean), and `modelGroups`
+(alias → ordered model list, max 20). Precedence is environment > file >
+built-in default. Edits apply within one second, no restart; invalid values are
+rejected and the last valid snapshot stays active. `GET /api/config` returns the
+effective values, their source, and the last parse error.
+
+A request for a group alias is sent to the first candidate; a `404`/`410`/
+`429`/`5xx` before any response bytes tries the next one. Failed models cool
+down in `<state>/model-health.json` (`404` 5 min, `429` 1 min, `5xx` 30 s) and
+are skipped by later requests until the cooldown expires.
+
+`GET /api/diagnostics?hours=24` returns per-egress and per-model request
+counts, `429`/`5xx` totals, the current success streak, active model
+cooldowns, and the last gateway rejection. The panel's Routing Diagnostics
+view renders it alongside pool health.
+
+### Cloudflare WARP (optional)
+
+`WARP_MANAGE=1` enables the panel's WARP card and `GET|POST /api/warp`. The
+gateway only drives a host-installed `warp-cli` (`connect`, `disconnect`,
+`status`); it never downloads binaries or writes credentials. Connecting
+changes whole-machine routing, so it is off by default and every action needs
+the panel session plus the same admin `Host`/JSON guard as `/api/proxy`.
+Without the binary the card reports `available: false`. Containers normally
+cannot reach the host's WARP daemon; run the gateway on the host or leave the
+feature disabled.
 
 </details>
 
@@ -375,9 +408,10 @@ acting browser.
 ### Egress proxy and pool
 
 Every outbound request — inference, discovery, identity sync, self-update —
-uses the configured egress. HTTP and HTTPS proxies are supported; Bun rejects
-SOCKS5. Credentials persist in `<state dir>/proxy.json` (mode `0600`) and never
-appear in `/health`, `/api/proxy`, or the panel.
+uses the configured egress. HTTP, HTTPS, and SOCKS5 proxies are supported;
+SOCKS5 runs through a loopback HTTP CONNECT shim (`socks-bridge.js`) so Bun
+still owns TLS. Credentials persist in `<state dir>/proxy.json` (mode `0600`)
+and never appear in `/health`, `/api/proxy`, or the panel.
 
 A pool keeps per-entry health with exponential cooldown persisted to
 `<state dir>/pool-health.json` (mode `0600`). Records are keyed by a hash of the
@@ -596,10 +630,13 @@ Read `egress.proxy.source`. `env` means `UPSTREAM_PROXY_URL` owns the setting
 and locks the panel; edit the service unit and restart. `file` means the panel
 value is active. `none` means no proxy is configured.
 
-### SOCKS5 proxy is rejected
+### SOCKS5 proxy fails
 
-Bun fetch supports HTTP and HTTPS proxies only. Terminate SOCKS in a local HTTP
-proxy, or use the mixed HTTP port from Clash/v2ray.
+`socks5://` and `socks5h://` are accepted; the gateway starts a loopback HTTP
+CONNECT shim per unique URL. Check the panel's Routing Diagnostics and the
+`/health` egress mode. Authentication is none or username/password. If the
+shim reports `SOCKS5 连接失败`, the SOCKS server refused the target; test it
+with `curl --socks5 host:port https://www.cloudflare.com/cdn-cgi/trace`.
 
 ### Reverse tunnel drops after a reboot
 

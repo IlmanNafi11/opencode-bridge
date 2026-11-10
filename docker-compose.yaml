@@ -11,6 +11,11 @@ services:
       # 面板会把出站代理写在这里。没有它，每次 `docker compose up -d`
       # 重建时该设置都会丢失（容器文件系统是临时的）。
       FUCKING_OPENCODE_STATE_DIR: /data/state
+      # 可选：把面板拆到单独端口。镜像默认 ADMIN_PORT=0（同端口）。
+      # ADMIN_PORT: "20135"
+      # 可选：WARP 管理默认关闭。容器通常没有 warp-cli，也没有主机网络
+      # 控制权；需要时请让容器直连主机 WARP，或在宿主机运行网关。
+      # WARP_MANAGE: "0"
       # 镜像是部署单元：就地自更新会在下一次 `docker compose build` 时被
       # 撤销。请改用
       # `docker compose build --pull && docker compose up -d` 升级。

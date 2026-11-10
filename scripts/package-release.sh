@@ -11,6 +11,7 @@ STAGE="$OUT/$NAME-$VERSION"
 
 FILES=(
   server.js identity.js token-budget.js compat.js proxy.js panel.js panel-settings.js
+  config.js model-groups.js socks-bridge.js warp.js
   stats.js egress-proxy.js transport-fingerprint.js transport-baseline.json
   verify.js gate-drill.js install.sh tunnel-doctor.sh package.json
   README.md CHANGELOG.md LICENSE THIRD_PARTY_NOTICES.md panel-avatar.png

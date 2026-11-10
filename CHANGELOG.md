@@ -1,6 +1,44 @@
 # Changelog
 
-## [Unreleased]
+## [0.2.0] — 2026-11-11
+
+Multi-key credentials, an optional admin port, and a movable usage ledger.
+
+- `settings.json` now stores a key list (`apiKeys`) with per-key label and
+  enable switch. The legacy single `apiKey` migrates on first write; the panel
+  can add, rename, disable, and delete keys, and never returns a full secret.
+  `FUCKING_OPENCODE_API_KEYS` entries are read-only.
+- `ADMIN_PORT` (with `ADMIN_BIND`) serves the panel and `/api/*` on its own
+  listener. The API port answers `/` with a redirect, refuses panel APIs with
+  `admin_port_only`, and the admin port refuses inference with
+  `api_port_only` while keeping `/health` and `/v1/models`.
+- `FUCKING_OPENCODE_USAGE_FILE` relocates `usage.jsonl`, so two gateways can
+  share a state directory without merging their ledgers.
+- New `config.js` reads `<state>/config.json` (or `FUCKING_OPENCODE_CONFIG`)
+  for `defaultModel`, `upstreamTimeoutMs`, `maxBodyBytes`, and `autoUpdate`.
+  Precedence is env > file > default; edits hot-reload within a second, invalid
+  values keep the last good snapshot, and `GET /api/config` reports values,
+  sources, and the parse error.
+- `modelGroups` maps an alias to an ordered model list. A `404`/`410`/`429`/`5xx`
+  before any client bytes switches to the next candidate; failures persist as
+  per-model cooldowns in `<state>/model-health.json` (`FUCKING_OPENCODE_MODEL_GROUPS`
+  overrides the file).
+- `GET /api/diagnostics?hours=24` aggregates per-egress and per-model requests,
+  `429`/`5xx` counts, success streak, and model cooldowns; the routing
+  diagnostics view renders the extra columns and a cooldown table.
+- `socks5://` and `socks5h://` egress entries are accepted. A loopback HTTP
+  CONNECT shim per unique URL performs the SOCKS handshake (none or
+  username/password) so Bun still owns TLS and the ClientHello baseline holds.
+- Opt-in Cloudflare WARP controls (`WARP_MANAGE=1`): `/api/warp` reports status
+  and drives a host-installed `warp-cli`; the egress view gains a WARP card.
+  Default off because it changes whole-machine routing.
+- Panel copy is fully translated across 中文/ID/EN, including dynamic pool
+  results (per-entry probe results, cooldown countdowns, failure reasons) and
+  the WARP card; the product version in the panel header and titles now comes
+  from the server instead of a hardcoded string.
+- Release packaging and the installer fetch list now ship the new runtime
+  modules (`config.js`, `model-groups.js`, `socks-bridge.js`, `warp.js`,
+  `compat.js`), so installed hosts receive them through both update paths.
 
 Anthropic and Responses protocols, usage history, opt-in API keys.
 

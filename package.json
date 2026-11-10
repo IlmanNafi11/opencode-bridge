@@ -1,6 +1,6 @@
 {
   "name": "fucking-opencode",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "OpenAI-compatible gateway to OpenCode free-tier models (no account required), self-adapting to gate changes",
   "main": "server.js",
   "bin": {
@@ -36,7 +36,13 @@
     "transport-baseline.json",
     "tunnel-doctor.sh",
     "proxy.js",
-    "panel.js"
+    "panel.js",
+    "config.js",
+    "model-groups.js",
+    "socks-bridge.js",
+    "warp.js",
+    "stats.js",
+    "compat.js"
   ],
   "keywords": [
     "opencode",

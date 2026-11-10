@@ -12,10 +12,10 @@
  * 池的意义：免费额度按出口 IP 计，不按账号计。多开桥只会成倍增加进程、
  * 服务单元和隧道，池在单个进程内完成 IP 轮转，身份与模型目录保持一处。
  *
- * 协议：仅 HTTP/HTTPS。Bun 的 `fetch` 对这两种协议接受 `proxy:`，TLS 经
- * CONNECT 隧道，ClientHello 仍由 Bun 发出，传输指纹基线不变。Bun 对 SOCKS5
- * 抛 `UnsupportedProxyProtocol`，所以在这里直接拒绝并说明，而不是让请求
- * 半路失败。
+ * 协议：HTTP/HTTPS 与 SOCKS5。HTTP(S) 让 Bun 直接走 `proxy:`，TLS 经
+ * CONNECT 隧道，ClientHello 仍由 Bun 发出。SOCKS5 不能直接交给 Bun
+ * （`UnsupportedProxyProtocol`），由 `socks-bridge.js` 在回环上开一个 HTTP
+ * CONNECT 入口，握手在本地完成，TLS 仍由 Bun 发出，指纹基线不变。
  *
  * 凭据保存在 `<state dir>/proxy.json`，绝不离开进程：HTTP 面板与 `/health`
  * 只能看到 描述状态() 的视图，其中只有 host:port。
@@ -25,6 +25,10 @@ const crypto = require("crypto");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
+let 桥接 = { 可抓取代理: (url) => url };
+try {
+  桥接 = require("./socks-bridge");
+} catch {}
 
 const 配置文件名 = "proxy.json";
 const 健康文件名 = "pool-health.json";
@@ -71,16 +75,14 @@ function 解析代理地址(raw) {
   } catch {
     return { ok: false, error: "代理 URL 无效。示例：http://user:pass@host:8080" };
   }
-  if (u.protocol !== "http:" && u.protocol !== "https:") {
+  if (u.protocol !== "http:" && u.protocol !== "https:" && u.protocol !== "socks5:" && u.protocol !== "socks5h:") {
     return {
       ok: false,
-      error:
-        `不支持 ${u.protocol} 协议。Bun fetch 只支持 http:// 和 https:// 代理` +
-        "（CONNECT 隧道）。运行时会拒绝 SOCKS5，所以这里无法使用。",
+      error: `不支持 ${u.protocol} 协议。代理只接受 http://、https:// 或 socks5://。`,
     };
   }
   if (!u.hostname) return { ok: false, error: "代理主机为空。" };
-  if (u.pathname !== "/" || u.search || u.hash) {
+  if ((u.pathname !== "" && u.pathname !== "/") || u.search || u.hash) {
     return { ok: false, error: "代理 URL 只能包含协议、凭据、主机与端口。" };
   }
   // `u.username`/`u.password` 保持用户输入时的百分号编码，这正是 Bun 期望的。
@@ -817,7 +819,7 @@ function 附带代理(init, egressUrl = null) {
   // 固定出口的调用方传 URL，空串是 direct 条目 —— 与不传（让池自己挑）不同。
   const target = egressUrl === null || egressUrl === undefined ? 挑选出口().url : egressUrl;
   if (!target) return init;
-  return { ...(init || {}), proxy: target };
+  return { ...(init || {}), proxy: 桥接.可抓取代理(target) };
 }
 
 /** 经解析出的出口执行 fetch()。唯一的出站入口。 */
@@ -839,13 +841,14 @@ async function 测试代理(url, { timeoutMs = 15000, probeUrl = null } = {}) {
   if (!parsed.url) return { ok: false, error: "代理 URL 为空。" };
 
   const started = Date.now();
-  const exit = await 探测出口地址(parsed.url, timeoutMs);
+  const 抓取地址 = 桥接.可抓取代理(parsed.url);
+  const exit = await 探测出口地址(抓取地址, timeoutMs);
   let res;
   try {
     // 默认值与随包的线上端点一致。调用方传当前端点，目录迁移不会把能用的代
     // 理误判成失败。
     res = await fetch(probeUrl || "https://opencode.ai/inference/v1/models", {
-      proxy: parsed.url,
+      proxy: 抓取地址,
       headers: { Authorization: "Bearer public" },
       signal: AbortSignal.timeout(timeoutMs),
     });
@@ -906,7 +909,7 @@ async function 测试代理池({ probeUrl = null, timeoutMs = 15000 } = {}) {
 async function 探测出口地址(proxyUrl, timeoutMs) {
   try {
     const res = await fetch("https://www.cloudflare.com/cdn-cgi/trace", {
-      proxy: proxyUrl,
+      proxy: 桥接.可抓取代理(proxyUrl),
       signal: AbortSignal.timeout(Math.min(timeoutMs, 8000)),
     });
     if (!res.ok) return { ip: null, error: `trace HTTP ${res.status}` };

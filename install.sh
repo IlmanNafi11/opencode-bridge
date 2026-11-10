@@ -154,7 +154,7 @@ if [ -n "$PREV_VERSION" ]; then
   say "Found existing install: v$PREV_VERSION in $BINDIR"
   BACKUP="$BINDIR/.backup-v$PREV_VERSION-$(date +%Y%m%d%H%M%S)"
   mkdir -p "$BACKUP"
-  for f in server.js identity.js token-budget.js verify.js gate-drill.js transport-fingerprint.js transport-baseline.json package.json tunnel-doctor.sh proxy.js panel.js egress-proxy.js THIRD_PARTY_NOTICES.md; do
+  for f in server.js identity.js token-budget.js verify.js gate-drill.js transport-fingerprint.js transport-baseline.json package.json tunnel-doctor.sh proxy.js panel.js panel-settings.js config.js model-groups.js socks-bridge.js warp.js compat.js stats.js egress-proxy.js THIRD_PARTY_NOTICES.md; do
     [ -f "$BINDIR/$f" ] && cp -p "$BINDIR/$f" "$BACKUP/$f" 2>/dev/null || true
   done
   say "Backed up to $BACKUP"
@@ -393,6 +393,15 @@ fetch tunnel-doctor.sh
 fetch proxy.js
 fetch panel.js
 
+fetch panel-settings.js
+fetch config.js
+fetch model-groups.js
+fetch socks-bridge.js
+fetch warp.js
+fetch compat.js
+fetch stats.js
+fetch egress-proxy.js
+
 # 语法损坏的发布绝不能替换可用的安装。
 #
 # `bun --check` 并不等于“只解析”：Bun 没有 --check 参数，所以它会把这个文件
@@ -406,7 +415,7 @@ syntax_check() {
   ' "$1"
 }
 
-for js in server.js identity.js token-budget.js verify.js gate-drill.js transport-fingerprint.js proxy.js panel.js; do
+for js in server.js identity.js token-budget.js verify.js gate-drill.js transport-fingerprint.js proxy.js panel.js panel-settings.js config.js model-groups.js socks-bridge.js warp.js compat.js stats.js egress-proxy.js; do
   syntax_check "$STAGE/$js" >/dev/null 2>&1 || die "$js failed a syntax check; the running gateway was left untouched"
 done
 for json in package.json transport-baseline.json; do
@@ -437,7 +446,7 @@ if [ -n "$(port_holder)" ]; then
   die "cannot bind port $PORT"
 fi
 
-for file in package.json server.js identity.js token-budget.js verify.js gate-drill.js transport-fingerprint.js transport-baseline.json tunnel-doctor.sh proxy.js panel.js egress-proxy.js THIRD_PARTY_NOTICES.md; do
+for file in package.json server.js identity.js token-budget.js verify.js gate-drill.js transport-fingerprint.js transport-baseline.json tunnel-doctor.sh proxy.js panel.js panel-settings.js config.js model-groups.js socks-bridge.js warp.js compat.js stats.js egress-proxy.js THIRD_PARTY_NOTICES.md; do
   [ -f "$STAGE/$file" ] && mv -f "$STAGE/$file" "$BINDIR/$file"
 done
 chmod +x "$BINDIR/server.js" "$BINDIR/identity.js" "$BINDIR/verify.js" "$BINDIR/gate-drill.js" "$BINDIR/transport-fingerprint.js" "$BINDIR/tunnel-doctor.sh" "$BINDIR/egress-proxy.js" 2>/dev/null || true
@@ -465,6 +474,9 @@ User=$(id -un)
 WorkingDirectory=$BINDIR
 Environment=PORT=$PORT
 Environment=HOST=$HOST
+Environment=ADMIN_PORT=${ADMIN_PORT:-0}
+Environment=ADMIN_BIND=${ADMIN_BIND:-$HOST}
+Environment=WARP_MANAGE=${WARP_MANAGE:-0}
 ExecStart="$RUNTIME" "$BINDIR/server.js"
 Restart=always
 RestartSec=3
@@ -496,6 +508,9 @@ Type=simple
 WorkingDirectory=$BINDIR
 Environment=PORT=$PORT
 Environment=HOST=$HOST
+Environment=ADMIN_PORT=${ADMIN_PORT:-0}
+Environment=ADMIN_BIND=${ADMIN_BIND:-$HOST}
+Environment=WARP_MANAGE=${WARP_MANAGE:-0}
 ExecStart="$RUNTIME" "$BINDIR/server.js"
 Restart=always
 RestartSec=3

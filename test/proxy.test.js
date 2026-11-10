@@ -69,10 +69,13 @@ describe("egress proxy", () => {
     assert.deepEqual(proxy.parseProxyUrl("   "), { ok: true, url: "" });
   });
 
-  it("refuses SOCKS and malformed URLs with a reason instead of failing inside a request", () => {
-    const socks = proxy.parseProxyUrl("socks5://127.0.0.1:1080");
-    assert.equal(socks.ok, false);
-    assert.match(socks.error, /SOCKS5/);
+  it("accepts SOCKS5, refuses malformed URLs before a request fails", () => {
+    assert.deepEqual(proxy.parseProxyUrl("socks5://127.0.0.1:1080"), {
+      ok: true,
+      url: "socks5://127.0.0.1:1080",
+    });
+    assert.equal(proxy.parseProxyUrl("socks5h://user:pass@host:1080").ok, true);
+    assert.equal(proxy.parseProxyUrl("socks5://host:1080/path").ok, false);
 
     for (const bad of ["not a url", "http://", "http://host:8080/some/path", "ftp://host:21"]) {
       const parsed = proxy.parseProxyUrl(bad);
@@ -249,9 +252,12 @@ describe("proxy HTTP surface", () => {
     assert.equal(cleared.status, 200);
     assert.equal(JSON.parse(cleared.raw).mode, "direct");
 
-    const bad = await request(port, "POST", "/api/proxy", { url: "socks5://127.0.0.1:1080" });
-    assert.equal(bad.status, 400);
-    assert.match(JSON.parse(bad.raw).error, /SOCKS5/);
+    const socksOk = await request(port, "POST", "/api/proxy", { url: "socks5://127.0.0.1:1080" });
+    assert.equal(socksOk.status, 200);
+    assert.equal(JSON.parse(socksOk.raw).mode, "proxy");
+    const socksBad = await request(port, "POST", "/api/proxy", { url: "socks5://127.0.0.1:1080/path" });
+    assert.equal(socksBad.status, 400);
+    await request(port, "POST", "/api/proxy", { url: "" });
 
     const noUrl = await request(port, "POST", "/api/proxy", { proxy: "x" });
     assert.equal(noUrl.status, 400);
@@ -366,7 +372,7 @@ describe("egress pool", () => {
   });
 
   it("refuses a malformed or duplicated entry instead of installing half a pool", () => {
-    assert.match(proxy.parsePoolSpec("socks5://a:1").errors[0], /SOCKS5/);
+    assert.ok(proxy.parsePoolSpec("not a url").errors.length > 0);
     assert.equal(proxy.parsePoolEntry({}, 3).ok, false);
 
     const dup = proxy.setPool(["http://a:1", "http://a:1"]);

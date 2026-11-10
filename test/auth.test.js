@@ -116,4 +116,30 @@ describe("panel login", () => {
   it("refuses non-JSON login requests", async () => {
     assert.equal((await request("POST", "/api/login", undefined, { "Content-Type": "text/plain" })).status, 415);
   });
+
+  it("manages downstream keys through the panel API", async () => {
+    const login = await request("POST", "/api/login", { password: "test-secret" });
+    const cookie = String(login.headers["set-cookie"]).split(";")[0];
+    const gate = (key) => request(
+      "POST",
+      "/v1/messages/count_tokens",
+      { model: "test-free", max_tokens: 5, messages: [{ role: "user", content: "abcd" }] },
+      key ? { authorization: `Bearer ${key}` } : {},
+    );
+
+    const added = await request("POST", "/api/settings", { addApiKey: { label: "ci", key: "ci-key-1234" } }, { cookie });
+    assert.equal(added.status, 200);
+    assert.equal(JSON.parse(added.raw).apiKeys.length, 1);
+    assert.ok(!added.raw.includes("ci-key-1234"));
+    assert.equal((await gate("ci-key-1234")).status, 200);
+
+    const id = JSON.parse(added.raw).apiKeys[0].id;
+    const disabled = await request("POST", "/api/settings", { updateApiKey: { id, enabled: false } }, { cookie });
+    assert.equal(disabled.status, 200);
+    assert.equal((await gate("ci-key-1234")).status, 401);
+
+    const removed = await request("POST", "/api/settings", { deleteApiKey: id }, { cookie });
+    assert.equal(removed.status, 200);
+    assert.equal(JSON.parse(removed.raw).apiKeys.length, 0);
+  });
 });

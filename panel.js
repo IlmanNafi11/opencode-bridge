@@ -289,6 +289,16 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 .cred-note { margin: 10px 0 0; color: var(--muted); font-size: 11.5px; overflow-wrap: anywhere; }
 .cred-preview { margin: 0 0 8px; color: var(--muted); font-size: 12.5px; }
 .cred-preview code { font-family: var(--mono); color: var(--ink); }
+.key-list { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
+.key-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface-2); }
+.key-row.is-off { opacity: 0.55; }
+.key-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.key-name { font-weight: 600; overflow-wrap: anywhere; }
+.key-preview { font-family: var(--mono); font-size: 11.5px; color: var(--muted); }
+.key-tag { font-size: 10.5px; padding: 1px 6px; border: 1px solid var(--line-strong); border-radius: 999px; color: var(--muted); white-space: nowrap; }
+.key-actions { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+.key-actions button { padding: 4px 9px; font-size: 11.5px; }
+.key-empty { color: var(--muted); font-size: 12px; margin: 10px 0 0; }
 .integration-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 18px; }
 .integration-grid .field { margin: 0; }
 .integration-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
@@ -450,6 +460,14 @@ const I18N = {
     "已复制。": "Tersalin.", "复制失败，请手动选择文本。": "Gagal menyalin, pilih teks manual.", "内容": "Konten", "健康检查失败": "Pemeriksaan kesehatan gagal",
     "检查失败": "Pemeriksaan gagal", "就绪": "siap", "需要 API 密钥": "Perlu API key", "清单为空": "Daftar kosong",
     "模型清单需要密钥": "Daftar model perlu kunci",
+    "Cloudflare WARP": "Cloudflare WARP",
+    "可选。仅当服务以 WARP_MANAGE=1 启动且主机安装了 warp-cli 时可用。连接/断开会改变整机路由。": "Opsional. Hanya jika layanan dijalankan dengan WARP_MANAGE=1 dan warp-cli terpasang di host. Connect/disconnect mengubah rute seluruh mesin.",
+    "连接": "Hubungkan", "断开": "Putuskan",
+    "未启用": "Nonaktif", "未安装 warp-cli": "warp-cli tidak terpasang", "连接中": "Menghubungkan", "已连接": "Terhubung", "已断开": "Terputus", "不可用": "Tidak tersedia", "读取失败": "Gagal membaca",
+    "正在连接 WARP…": "Menghubungkan WARP…", "正在断开 WARP…": "Memutuskan WARP…", "WARP 已连接。": "WARP terhubung.", "WARP 已断开。": "WARP terputus.", "WARP 操作失败。": "Operasi WARP gagal.",
+    "读取 WARP 状态失败：": "Gagal membaca status WARP: ",
+    "代理测试失败。": "Uji proxy gagal.", "原因未知": "Alasan tidak diketahui", "无条目": "Tidak ada entri",
+    "本地运维面板": "Panel operasional lokal", "直连（本机 IP）": "Langsung (IP lokal)", "未设置代理": "Proxy belum diatur",
     "网关开放": "Gateway terbuka", "网关冷却中": "Gateway cooldown", "出口 IP 被封": "IP egress diblokir",
     "冷却至": "Cooldown sampai", "最近拒绝：": "Penolakan terbaru:", "无近期拒绝记录": "Tidak ada penolakan terbaru", "未知": "Tidak diketahui",
     "没有匹配的区块。": "Tidak ada bagian yang cocok.", "先填入要测试的代理 URL。": "Isi URL proxy yang akan diuji.",
@@ -530,6 +548,14 @@ const I18N = {
     "已复制。": "Copied.", "复制失败，请手动选择文本。": "Copy failed; select the text manually.", "内容": "Content", "健康检查失败": "Health check failed",
     "检查失败": "Check failed", "就绪": "ready", "需要 API 密钥": "API key required", "清单为空": "List is empty",
     "模型清单需要密钥": "Model list needs a key",
+    "Cloudflare WARP": "Cloudflare WARP",
+    "可选。仅当服务以 WARP_MANAGE=1 启动且主机安装了 warp-cli 时可用。连接/断开会改变整机路由。": "Optional. Available only when the service runs with WARP_MANAGE=1 and warp-cli is installed on the host. Connect/disconnect changes whole-machine routing.",
+    "连接": "Connect", "断开": "Disconnect",
+    "未启用": "Disabled", "未安装 warp-cli": "warp-cli not installed", "连接中": "Connecting", "已连接": "Connected", "已断开": "Disconnected", "不可用": "Unavailable", "读取失败": "Failed to read",
+    "正在连接 WARP…": "Connecting WARP…", "正在断开 WARP…": "Disconnecting WARP…", "WARP 已连接。": "WARP connected.", "WARP 已断开。": "WARP disconnected.", "WARP 操作失败。": "WARP operation failed.",
+    "读取 WARP 状态失败：": "Failed to read WARP status: ",
+    "代理测试失败。": "Proxy test failed.", "原因未知": "Unknown reason", "无条目": "No entries",
+    "本地运维面板": "Local ops panel", "直连（本机 IP）": "Direct (local IP)", "未设置代理": "No proxy configured",
     "网关开放": "Gateway open", "网关冷却中": "Gateway cooling down", "出口 IP 被封": "Egress IP blocked",
     "冷却至": "Cooling until", "最近拒绝：": "Latest refusal:", "无近期拒绝记录": "No recent refusals", "未知": "Unknown",
     "没有匹配的区块。": "No matching sections.", "先填入要测试的代理 URL。": "Enter the proxy URL to test first.",
@@ -633,6 +659,18 @@ Object.assign(I18N.patch.id, {
   "统计已更新。": "Statistik diperbarui.",
   "还没有流量记录。发起一次推理后再刷新统计。": "Belum ada catatan trafik. Jalankan satu inferensi lalu segarkan statistik.",
   "这个范围内没有可分组的数据。": "Tidak ada data untuk dikelompokkan dalam rentang ini.",
+  "添加下游 key": "Tambah key hilir", "标签（可选）": "Label (opsional)",
+  "输入新的 API key": "Masukkan API key baru", "例如：laptop、ci": "mis. laptop, ci",
+  "添加 key": "Tambah key", "删除全部": "Hapus semua", "改名": "Ganti nama", "删除": "Hapus",
+  "环境变量": "Variabel env", "当前 key：": "Key saat ini: ",
+  "当前未设置 key：启用后仅接受已登记的 Bearer。": "Belum ada key: setelah diaktifkan hanya Bearer terdaftar yang diterima.",
+  "尚未添加入口 key。": "Belum ada key masuk.",
+  "API key 已添加，立即生效。": "API key ditambahkan dan langsung aktif.",
+  "标签已更新。": "Label diperbarui.", "key 已停用。": "Key dinonaktifkan.",
+  "key 已启用。": "Key diaktifkan.", "key 已删除。": "Key dihapus.",
+  "本机保存的 API key 已全部删除。": "Semua API key yang tersimpan di mesin ini dihapus.",
+  "连续成功": "Sukses beruntun", "模型冷却": "Pendinginan model",
+  "冷却原因": "Alasan pendingin", "剩余": "Sisa",
 });
 
 Object.assign(I18N.patch.en, {
@@ -653,6 +691,18 @@ Object.assign(I18N.patch.en, {
   "统计已更新。": "Stats updated.",
   "还没有流量记录。发起一次推理后再刷新统计。": "No traffic yet. Run one inference, then refresh.",
   "这个范围内没有可分组的数据。": "No groupable data in this range.",
+  "添加下游 key": "Add downstream key", "标签（可选）": "Label (optional)",
+  "输入新的 API key": "Enter a new API key", "例如：laptop、ci": "e.g. laptop, ci",
+  "添加 key": "Add key", "删除全部": "Delete all", "改名": "Rename", "删除": "Delete",
+  "环境变量": "Env var", "当前 key：": "Current key: ",
+  "当前未设置 key：启用后仅接受已登记的 Bearer。": "No key set: once enabled, only registered Bearer keys are accepted.",
+  "尚未添加入口 key。": "No downstream keys yet.",
+  "API key 已添加，立即生效。": "API key added and active immediately.",
+  "标签已更新。": "Label updated.", "key 已停用。": "Key disabled.",
+  "key 已启用。": "Key enabled.", "key 已删除。": "Key deleted.",
+  "本机保存的 API key 已全部删除。": "All API keys saved on this machine were deleted.",
+  "连续成功": "Success streak", "模型冷却": "Model cooldowns",
+  "冷却原因": "Cooldown reason", "剩余": "Remaining",
 });
 
 let panelLang = "id";
@@ -682,6 +732,8 @@ function tr(text) {
 function translatePattern(text) {
   const id = panelLang === "id";
   let m;
+  if ((m = text.match(/^共 (\\d+) 个 key。$/))) return id ? "Total " + m[1] + " key." : m[1] + " keys.";
+  if ((m = text.match(/^当前 key：(.*)。$/))) return (id ? "Key saat ini: " : "Current key: ") + m[1] + ".";
   if ((m = text.match(/^本地运维面板 · (v.+)$/))) return (id ? "Panel operasional lokal · " : "Local ops panel · ") + m[1];
   if ((m = text.match(/^(\\d+) 个模型$/))) return id ? m[1] + " model" : m[1] + " models";
   if ((m = text.match(/^(\\d+) 成功 · (\\d+) 失败$/))) return id ? m[1] + " sukses · " + m[2] + " gagal" : m[1] + " OK · " + m[2] + " fail";
@@ -699,9 +751,13 @@ function translatePattern(text) {
   if (text === "已开启（/v1/* 需 Bearer）") return id ? "Aktif (Bearer untuk /v1/*)" : "Enabled (Bearer required for /v1/*)";
   if (text === "未开启（任意非空 key）") return id ? "Nonaktif (key apa pun tidak kosong)" : "Disabled (any non-empty key)";
   if ((m = text.match(/^(\\d+) 毫秒$/))) return id ? m[1] + " md" : m[1] + " ms";
+  if ((m = text.match(/^(\\d+) 个$/))) return id ? m[1] + " model" : m[1] + " models";
+  if ((m = text.match(/^冷却 (\\d+) 毫秒$/))) return id ? "Cooldown " + m[1] + " md" : "Cooldown " + m[1] + " ms";
+  if ((m = text.match(/^读取失败：(.*)$/))) return (id ? "Gagal membaca: " : "Failed to read: ") + m[1];
   if ((m = text.match(/^(.*) 已复制。$/))) return id ? m[1] + " tersalin." : m[1] + " copied.";
   if ((m = text.match(/^加载状态失败：(.*)$/))) return (id ? "Gagal memuat status: " : "Failed to load status: ") + m[1];
   if ((m = text.match(/^加载统计失败：(.*)$/))) return (id ? "Gagal memuat statistik: " : "Failed to load stats: ") + m[1];
+  if ((m = text.match(/^读取 WARP 状态失败：(.*)$/))) return (id ? "Gagal membaca status WARP: " : "Failed to read WARP status: ") + m[1];
   if ((m = text.match(/^加载历史失败：(.*)$/))) return (id ? "Gagal memuat riwayat: " : "Failed to load history: ") + m[1];
   if ((m = text.match(/^请求失败：(.*)$/))) return (id ? "Permintaan gagal: " : "Request failed: ") + m[1];
   if ((m = text.match(/^正在测试 (\\d+) 个代理 …$/))) return (id ? "Menguji " + m[1] + " proxy …" : "Testing " + m[1] + " proxies …");
@@ -709,6 +765,10 @@ function translatePattern(text) {
   if ((m = text.match(/^代理连通上游（HTTP (\\d+)），耗时 (\\d+) 毫秒。$/))) return id ? "Proxy mencapai upstream (HTTP " + m[1] + ") dalam " + m[2] + " md." : "Proxy reached upstream (HTTP " + m[1] + ") in " + m[2] + " ms.";
   if ((m = text.match(/^出口 IP：(.*)$/))) return "Exit IP: " + m[1];
   if ((m = text.match(/^出口 IP 读取失败：(.*)$/))) return id ? "Gagal membaca exit IP: " + m[1] : "Failed to read exit IP: " + m[1];
+  if ((m = text.match(/^(.*) 正常，(\\d+) 毫秒，出口 IP (.*)$/))) return id ? m[1] + " normal, " + m[2] + " md, IP keluar " + m[3] : m[1] + " OK, " + m[2] + " ms, exit IP " + m[3];
+  if ((m = text.match(/^(.*) 正常，(\\d+) 毫秒$/))) return id ? m[1] + " normal, " + m[2] + " md" : m[1] + " OK, " + m[2] + " ms";
+  if ((m = text.match(/^约 (\\d+) 秒后恢复 · 失败 (\\d+) 次 · (.+)$/))) return id ? "Pulih ~" + m[1] + " dtk · gagal " + m[2] + "× · " + m[3] : "~" + m[1] + " s to recover · " + m[2] + " failures · " + m[3];
+  if ((m = text.match(/^约 (\\d+) 秒后恢复$/))) return id ? "Pulih ~" + m[1] + " dtk" : "~" + m[1] + " s to recover";
   if ((m = text.match(/^代理池已启用：(\\d+)\\/(\\d+) 条，策略 (.+)。$/))) return id ? "Pool aktif: " + m[1] + "/" + m[2] + " entri, strategi " + m[3] + "." : "Pool enabled: " + m[1] + "/" + m[2] + " entries, strategy " + m[3] + ".";
   if ((m = text.match(/^HTTP (\\d+) · (\\d+) 毫秒 · 模型 (.+)$/))) return id ? "HTTP " + m[1] + " · " + m[2] + " md · model " + m[3] : "HTTP " + m[1] + " · " + m[2] + " ms · model " + m[3];
   if ((m = text.match(/^词元：输入 (.*) · 输出 (.*)$/))) return id ? "Token: input " + m[1] + " · output " + m[2] : "Tokens: input " + m[1] + " · output " + m[2];
@@ -795,7 +855,7 @@ function applyLang(lang) {
   if (dict) translateRoot(document.body, dict);
   $$("[data-lang]").forEach((btn) => btn.setAttribute("aria-pressed", btn.dataset.lang === lang ? "true" : "false"));
   $("crumb").textContent = tr(VIEWS[currentView]);
-  document.title = tr(VIEWS[currentView]) + " · Fucking Opencode 0.1.1";
+  document.title = tr(VIEWS[currentView]) + " · Fucking Opencode " + (document.body.dataset.version || "");
   // 动态渲染的区块（用量页）需要按新语言重建文字。
   document.dispatchEvent(new CustomEvent("panel-lang", { detail: lang }));
 }
@@ -857,7 +917,7 @@ function go(view, opts) {
     else btn.removeAttribute("aria-current");
   });
   $("crumb").textContent = tr(VIEWS[view]);
-  document.title = tr(VIEWS[view]) + " · Fucking Opencode 0.1.1";
+  document.title = tr(VIEWS[view]) + " · Fucking Opencode " + (document.body.dataset.version || "");
   if (view === "overview") loadOverviewMetrics();
   else if (view === "health") loadHealthView();
   else if (view === "diag") 载入路由诊断();
@@ -866,6 +926,7 @@ function go(view, opts) {
     const btn = $("stats-load");
     if (btn) btn.click();
   }
+  else if (view === "egress") 载入WARP();
   else if (view === "docs") loadDocs();
   else if (view === "playground") loadPlayground();
   else if (view === "settings") loadSettings();
@@ -1143,8 +1204,8 @@ $("pool-list").addEventListener("click", async (event) => {
       const result = await send("/api/proxy/test", { testId: id });
       showReport($("pool-report"), [
         result.ok
-          ? line((result.label || result.id) + " 正常，" + result.latencyMs + " 毫秒，出口 IP " + (result.exitIp || "读取失败"), "ok")
-          : line((result.label || result.id) + " " + (result.error || "失败"), "bad"),
+          ? line((result.label || result.id) + " 正常，" + result.latencyMs + " 毫秒，出口 IP " + (result.exitIp || tr("读取失败")), "ok")
+          : line((result.label || result.id) + " " + (result.error || tr("失败")), "bad"),
       ]);
     } else if (action === "toggle") {
       const state = await send("/api/proxy", { toggle: id });
@@ -1299,6 +1360,64 @@ directBtn.addEventListener("click", async () => {
   }
 });
 
+let warpBusy = false;
+
+function 渲染WARP(state) {
+  const meta = $("warp-meta");
+  if (!meta) return;
+  const 未启用 = state && state.enabled === false;
+  const 不可用 = state && state.available === false;
+  let 文案 = "不可用";
+  if (未启用) 文案 = "未启用";
+  else if (不可用) 文案 = "未安装 warp-cli";
+  else if (state.connecting) 文案 = "连接中";
+  else if (state.connected) 文案 = "已连接";
+  else 文案 = "已断开";
+  meta.textContent = state && state.version ? tr(文案) + " · " + state.version : tr(文案);
+  const connect = $("warp-connect");
+  const disconnect = $("warp-disconnect");
+  const 可操作 = Boolean(state && state.enabled && state.available) && !warpBusy;
+  connect.disabled = !可操作 || Boolean(state.connected);
+  disconnect.disabled = !可操作 || !state.connected;
+}
+
+async function 载入WARP() {
+  const meta = $("warp-meta");
+  if (!meta) return;
+  try {
+    渲染WARP(await readJson(await fetch("/api/warp")));
+  } catch (err) {
+    meta.textContent = tr("读取失败");
+    showReport($("warp-report"), [line("读取 WARP 状态失败：" + err.message, "bad")]);
+  }
+}
+
+async function WARP动作(action) {
+  if (warpBusy) return;
+  warpBusy = true;
+  $("warp-connect").disabled = true;
+  $("warp-disconnect").disabled = true;
+  showReport($("warp-report"), [line(action === "connect" ? "正在连接 WARP…" : "正在断开 WARP…")]);
+  try {
+    const result = await send("/api/warp", { action });
+    if (result.status) 渲染WARP(result.status);
+    const 提示 = result.ok
+      ? (action === "connect" ? "WARP 已连接。" : "WARP 已断开。")
+      : (result.error || "WARP 操作失败。");
+    showReport($("warp-report"), [line(提示, result.ok ? "ok" : "bad")]);
+    if (!result.ok) await 载入WARP();
+  } catch (err) {
+    showReport($("warp-report"), [line(err.message, "bad")]);
+    await 载入WARP();
+  } finally {
+    warpBusy = false;
+  }
+}
+
+$("warp-connect").addEventListener("click", () => WARP动作("connect"));
+$("warp-disconnect").addEventListener("click", () => WARP动作("disconnect"));
+$("warp-refresh").addEventListener("click", 载入WARP);
+
 $("pool-save").addEventListener("click", async () => {
   const entries = readPoolInput();
   if (entries.length === 0) {
@@ -1331,9 +1450,9 @@ $("pool-test").addEventListener("click", async () => {
     const nodes = (result.entries || []).map((entry) => {
       const head = (entry.label || entry.host || entry.id) + " · ";
       if (entry.ok) {
-        return line(head + "正常，" + entry.latencyMs + " 毫秒，出口 IP " + (entry.exitIp || "读取失败"), "ok");
+        return line(head + "正常，" + entry.latencyMs + " 毫秒，出口 IP " + (entry.exitIp || tr("读取失败")), "ok");
       }
-      return line(head + (entry.error || "失败"), "bad");
+      return line(head + (entry.error || tr("失败")), "bad");
     });
     showReport($("pool-report"), nodes.length ? nodes : [line("没有结果。", "bad")]);
   } catch (err) {
@@ -1848,12 +1967,12 @@ function 分类错误(文本) {
 async function 载入路由诊断() {
   const 容器 = $("diag-egress");
   if (!容器) return;
-  let 池 = null, 历史 = null, 统计 = null;
+  let 池 = null, 历史 = null, 诊断 = null;
   try {
-    [池, 历史, 统计] = await Promise.all([
+    [池, 历史, 诊断] = await Promise.all([
       readJson(await fetch("/api/proxy")),
       readJson(await fetch("/api/history?limit=500")).catch(() => null),
-      readJson(await fetch("/api/stats")).catch(() => null),
+      readJson(await fetch("/api/diagnostics?hours=24")).catch(() => null),
     ]);
   } catch (err) {
     showReport($("diag-report"), [line("读取失败：" + err.message, "bad")]);
@@ -1922,19 +2041,21 @@ async function 载入路由诊断() {
     cur.ms += r.ms || 0;
     按出口.set(key, cur);
   }
+  const 诊断出口 = new Map(((诊断 && 诊断.egress) || []).map((e) => [e.key, e]));
   const 表体二 = $("diag-egress-stats").querySelector("tbody");
   表体二.replaceChildren();
   if (!按出口.size) {
     const baris = document.createElement("tr");
     const td = document.createElement("td");
-    td.colSpan = 5;
+    td.colSpan = 7;
     td.textContent = tr("暂无记录");
     baris.append(td);
     表体二.append(baris);
   } else {
     for (const [name, s] of [...按出口.entries()].sort((a, b) => b[1].n - a[1].n)) {
       const baris = document.createElement("tr");
-      const cells = [name, String(s.n), String(s.ok), String(s.fail), fmtMs(s.n ? Math.round(s.ms / s.n) : null)];
+      const d = 诊断出口.get(name);
+      const cells = [name, String(s.n), String(s.ok), String(s.fail), String(d ? d.rate429 : 0), String(d ? d.连续成功 : 0), fmtMs(s.n ? Math.round(s.ms / s.n) : null)];
       cells.forEach((text, i) => {
         const td = document.createElement("td");
         if (i > 0) td.className = "mono";
@@ -1945,8 +2066,8 @@ async function 载入路由诊断() {
     }
   }
 
-  // 表三：模型失败分布（只列失败过的模型）。
-  const 模型 = (统计 && 统计.models) || [];
+  // 表三：模型失败分布（诊断窗口内失败过的模型，含 429 次数）。
+  const 模型 = (诊断 && 诊断.models) || [];
   const 有失败 = 模型.filter((m) => m.fail > 0).sort((a, b) => b.fail - a.fail);
   const 表体三 = $("diag-models").querySelector("tbody");
   表体三.replaceChildren();
@@ -1954,14 +2075,14 @@ async function 载入路由诊断() {
   if (!有失败.length) {
     const baris = document.createElement("tr");
     const td = document.createElement("td");
-    td.colSpan = 5;
+    td.colSpan = 6;
     td.textContent = tr("暂无记录");
     baris.append(td);
     表体三.append(baris);
   } else {
     for (const m of 有失败) {
       const baris = document.createElement("tr");
-      const cells = [m.model, String(m.requests), String(m.ok), String(m.fail), Math.round((m.fail / m.requests) * 100) + "%"];
+      const cells = [m.key, String(m.requests), String(m.ok), String(m.fail), String(m.rate429), Math.round((m.fail / m.requests) * 100) + "%"];
       cells.forEach((text, i) => {
         const td = document.createElement("td");
         if (i > 0) td.className = "mono";
@@ -1969,6 +2090,32 @@ async function 载入路由诊断() {
         baris.append(td);
       });
       表体三.append(baris);
+    }
+  }
+
+  // 表四：模型冷却（model-health.json 的当前条目）。
+  const 冷却 = (诊断 && 诊断.cooldowns) || [];
+  const 表体四 = $("diag-cooldowns").querySelector("tbody");
+  表体四.replaceChildren();
+  $("diag-cooldown-meta").textContent = 冷却.length ? String(冷却.length) : "-";
+  if (!冷却.length) {
+    const baris = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 3;
+    td.textContent = tr("暂无记录");
+    baris.append(td);
+    表体四.append(baris);
+  } else {
+    for (const c of 冷却) {
+      const baris = document.createElement("tr");
+      const cells = [c.model, c.reason, Math.ceil(c.remainingMs / 1000) + "s"];
+      cells.forEach((text, i) => {
+        const td = document.createElement("td");
+        if (i === 2) td.className = "mono";
+        td.textContent = text;
+        baris.append(td);
+      });
+      表体四.append(baris);
     }
   }
   showReport($("diag-report"), [line("路由诊断已刷新。", "ok")]);
@@ -2462,15 +2609,83 @@ async function loadSettings() {
   }
 }
 
+function renderKeyRows(keys) {
+  const list = $("cred-key-list");
+  if (!list) return;
+  list.replaceChildren();
+  if (!keys.length) {
+    const empty = document.createElement("p");
+    empty.className = "key-empty";
+    empty.textContent = "尚未添加入口 key。";
+    list.append(empty);
+    return;
+  }
+  for (const entry of keys) {
+    const row = document.createElement("div");
+    row.className = "key-row" + (entry.enabled ? "" : " is-off");
+    const main = document.createElement("div");
+    main.className = "key-main";
+    const name = document.createElement("div");
+    name.className = "key-name";
+    name.textContent = entry.label;
+    const preview = document.createElement("div");
+    preview.className = "key-preview";
+    preview.textContent = entry.preview;
+    if (entry.source === "env") {
+      const tag = document.createElement("span");
+      tag.className = "key-tag";
+      tag.textContent = "环境变量";
+      preview.append(" ", tag);
+    }
+    main.append(name, preview);
+    const actions = document.createElement("div");
+    actions.className = "key-actions";
+    if (entry.source !== "env") {
+      const rename = document.createElement("button");
+      rename.type = "button";
+      rename.textContent = "改名";
+      rename.addEventListener("click", async () => {
+        const label = prompt("新的标签", entry.label);
+        if (label === null) return;
+        const saved = await savePanelSettings({ updateApiKey: { id: entry.id, label } }, "标签已更新。");
+        if (saved) renderCredentials(saved);
+      });
+      const toggle = document.createElement("button");
+      toggle.type = "button";
+      toggle.textContent = entry.enabled ? "停用" : "启用";
+      toggle.addEventListener("click", async () => {
+        const saved = await savePanelSettings(
+          { updateApiKey: { id: entry.id, enabled: !entry.enabled } },
+          entry.enabled ? "key 已停用。" : "key 已启用。",
+        );
+        if (saved) renderCredentials(saved);
+      });
+      const del = document.createElement("button");
+      del.type = "button";
+      del.className = "danger";
+      del.textContent = "删除";
+      del.addEventListener("click", async () => {
+        if (!confirm("删除 key「" + entry.label + "」？使用它的客户端会立即收到 401。")) return;
+        const saved = await savePanelSettings({ deleteApiKey: entry.id }, "key 已删除。");
+        if (saved) renderCredentials(saved);
+      });
+      actions.append(rename, toggle, del);
+    }
+    row.append(main, actions);
+    list.append(row);
+  }
+}
+
 function renderCredentials(settings) {
-  const api = settings.apiKey || {};
   const password = settings.panelPassword || {};
+  const keys = Array.isArray(settings.apiKeys) ? settings.apiKeys : [];
   const preview = $("cred-key-preview");
   if (preview) {
-    preview.textContent = api.configured
-      ? "当前 key：" + api.preview + "（来源：" + (api.source === "env" ? "环境变量" : "本机文件") + "）"
-      : "当前未设置 key：任何非空 Bearer 都会被接受。";
+    preview.textContent = keys.length
+      ? (keys.length === 1 ? "当前 key：" + keys[0].preview + "。" : "共 " + keys.length + " 个 key。")
+      : "当前未设置 key：启用后仅接受已登记的 Bearer。";
   }
+  renderKeyRows(keys);
   const file = $("cred-file");
   if (file) file.textContent = settings.file ? "保存到 " + settings.file : "";
   const note = $("cred-note");
@@ -2523,8 +2738,12 @@ if (credSaveKey) {
       showReport($("cred-report"), [line("先填入新的 API key。", "bad")]);
       return;
     }
-    const saved = await savePanelSettings({ apiKey: value }, "API key 已保存，立即生效。");
-    if (saved) $("cred-api-key").value = "";
+    const label = $("cred-key-label") ? $("cred-key-label").value.trim() : "";
+    const saved = await savePanelSettings({ addApiKey: { label, key: value } }, "API key 已添加，立即生效。");
+    if (saved) {
+      $("cred-api-key").value = "";
+      if ($("cred-key-label")) $("cred-key-label").value = "";
+    }
   });
 }
 
@@ -2538,7 +2757,10 @@ if (credRandomKey) {
 
 const credClearKey = $("cred-clear-key");
 if (credClearKey) {
-  credClearKey.addEventListener("click", () => savePanelSettings({ clearApiKey: true }, "API key 已删除，鉴权关闭。"));
+  credClearKey.addEventListener("click", () => {
+    if (!confirm("删除本机保存的全部 API key？使用这些 key 的客户端会立即收到 401。")) return;
+    savePanelSettings({ clearApiKey: true }, "本机保存的 API key 已全部删除。");
+  });
 }
 
 const credSavePass = $("cred-save-pass");
@@ -2630,17 +2852,17 @@ function renderPanel(description, { version = "", port = "", authRequired = fals
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
-<title>概览 · Fucking Opencode 0.1.1</title>
+<title>概览 · Fucking Opencode ${version}</title>
 <style>${STYLE}</style>
 </head>
-<body data-auth-required="${authRequired ? "true" : "false"}" data-panel-key="${escapeHtml(apiKey)}">
+<body data-auth-required="${authRequired ? "true" : "false"}" data-panel-key="${escapeHtml(apiKey)}" data-version="${version}">
 <a class="skip" href="#main">跳到主内容</a>
 <div class="app" id="app">
   <aside class="sidebar" id="sidebar" aria-label="主导航">
     <div class="brand">
       <img class="brand-mark brand-avatar" src="/panel-avatar.png" alt="" onerror="this.hidden=true">
       <div class="brand-text">
-        <span class="brand-name" title="Fucking Opencode 0.1.1">Fucking Opencode 0.1.1</span>
+        <span class="brand-name" title="Fucking Opencode ${version}">Fucking Opencode ${version}</span>
         <span class="brand-sub js-version">本地运维面板</span>
       </div>
     </div>
@@ -2718,7 +2940,7 @@ function renderPanel(description, { version = "", port = "", authRequired = fals
         <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="3" width="11" height="10" rx="1.5"/><path d="M6.5 3v10"/></svg>
       </button>
       <div class="crumb">
-        <span class="crumb-root">Fucking Opencode 0.1.1</span>
+        <span class="crumb-root">Fucking Opencode ${version}</span>
         <span class="crumb-sep">/</span>
         <strong id="crumb">概览</strong>
       </div>
@@ -2852,7 +3074,7 @@ function renderPanel(description, { version = "", port = "", authRequired = fals
           <div class="card-head"><h2>按出口统计</h2><span class="card-meta">最近 500 条</span></div>
           <div class="table-wrap">
             <table class="diag-table" id="diag-egress-stats">
-              <thead><tr><th scope="col">出口</th><th scope="col" class="num">请求</th><th scope="col" class="num">成功</th><th scope="col" class="num">失败</th><th scope="col" class="num">平均耗时</th></tr></thead>
+              <thead><tr><th scope="col">出口</th><th scope="col" class="num">请求</th><th scope="col" class="num">成功</th><th scope="col" class="num">失败</th><th scope="col" class="num">429</th><th scope="col" class="num">连续成功</th><th scope="col" class="num">平均耗时</th></tr></thead>
               <tbody></tbody>
             </table>
           </div>
@@ -2861,7 +3083,16 @@ function renderPanel(description, { version = "", port = "", authRequired = fals
           <div class="card-head"><h2>模型失败分布</h2><span class="card-meta" id="diag-models-meta">-</span></div>
           <div class="table-wrap">
             <table class="diag-table" id="diag-models">
-              <thead><tr><th scope="col">模型</th><th scope="col" class="num">请求</th><th scope="col" class="num">成功</th><th scope="col" class="num">失败</th><th scope="col" class="num">失败率</th></tr></thead>
+              <thead><tr><th scope="col">模型</th><th scope="col" class="num">请求</th><th scope="col" class="num">成功</th><th scope="col" class="num">失败</th><th scope="col" class="num">429</th><th scope="col" class="num">失败率</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>模型冷却</h2><span class="card-meta" id="diag-cooldown-meta">-</span></div>
+          <div class="table-wrap">
+            <table class="diag-table" id="diag-cooldowns">
+              <thead><tr><th scope="col">模型</th><th scope="col">冷却原因</th><th scope="col" class="num">剩余</th></tr></thead>
               <tbody></tbody>
             </table>
           </div>
@@ -2907,6 +3138,16 @@ function renderPanel(description, { version = "", port = "", authRequired = fals
             </div>
             <div class="report" id="report" role="status" aria-live="polite" hidden></div>
           </form>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>Cloudflare WARP</h2><span class="card-meta" id="warp-meta">-</span></div>
+          <p class="hint" id="warp-hint">可选。仅当服务以 WARP_MANAGE=1 启动且主机安装了 warp-cli 时可用。连接/断开会改变整机路由。</p>
+          <div class="actions">
+            <button type="button" class="primary" id="warp-connect">连接</button>
+            <button type="button" id="warp-disconnect">断开</button>
+            <button type="button" id="warp-refresh">刷新</button>
+          </div>
+          <div class="report" id="warp-report" role="status" aria-live="polite" hidden></div>
         </div>
       </section>
 
@@ -3148,6 +3389,8 @@ function renderPanel(description, { version = "", port = "", authRequired = fals
                 <tr><td><span class="method">GET</span></td><td class="mono">/api/proxy</td><td>面板</td><td>读取出口配置与代理池健康。</td></tr>
                 <tr><td><span class="method post">POST</span></td><td class="mono">/api/proxy</td><td>面板</td><td>写入单代理或代理池。</td></tr>
                 <tr><td><span class="method post">POST</span></td><td class="mono">/api/proxy/test</td><td>面板</td><td>探测代理，不落盘。</td></tr>
+                <tr><td><span class="method">GET</span></td><td class="mono">/api/warp</td><td>面板</td><td>读取可选的 Cloudflare WARP 状态。</td></tr>
+                <tr><td><span class="method post">POST</span></td><td class="mono">/api/warp</td><td>面板</td><td>连接或断开 WARP（需 WARP_MANAGE=1）。</td></tr>
               </tbody>
             </table>
           </div>
@@ -3215,11 +3458,16 @@ function renderPanel(description, { version = "", port = "", authRequired = fals
                   <label for="cred-api-key">API key（下游 Bearer）</label>
                   <input type="text" id="cred-api-key" autocomplete="off" spellcheck="false" placeholder="输入新的 API key">
                 </div>
-                <div class="cred-actions">
-                  <button type="button" class="primary" id="cred-save-key">保存 key</button>
-                  <button type="button" id="cred-random-key">随机生成</button>
-                  <button type="button" class="danger" id="cred-clear-key">删除 key</button>
+                <div class="field">
+                  <label for="cred-key-label">标签（可选）</label>
+                  <input type="text" id="cred-key-label" autocomplete="off" spellcheck="false" maxlength="40" placeholder="例如：laptop、ci">
                 </div>
+                <div class="cred-actions">
+                  <button type="button" class="primary" id="cred-save-key">添加 key</button>
+                  <button type="button" id="cred-random-key">随机生成</button>
+                  <button type="button" class="danger" id="cred-clear-key">删除全部</button>
+                </div>
+                <div class="key-list" id="cred-key-list"></div>
               </div>
               <div>
                 <div class="field">
@@ -3332,14 +3580,14 @@ function renderLogin({ version = "", port = "" } = {}) {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
-<title>Masuk · Fucking Opencode 0.1.1</title>
+<title>Masuk · Fucking Opencode ${version}</title>
 <style>${STYLE}</style>
 </head>
 <body>
 <div class="login-wrap">
   <div class="login-card">
     <img class="login-avatar" src="/panel-avatar.png" alt="" onerror="this.hidden=true">
-    <h1>Fucking Opencode 0.1.1</h1>
+    <h1>Fucking Opencode ${version}</h1>
     <p class="login-sub" id="login-sub">Masuk untuk membuka panel operasi gateway.</p>
     <form id="login-form" novalidate>
       <div class="field">

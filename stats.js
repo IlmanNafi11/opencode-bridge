@@ -26,7 +26,17 @@ function 状态目录() {
   return dir;
 }
 
+/**
+ * 用量文件可以单独指定，便于与 opencode2api 或另一个实例并排运行时
+ * 各自记账。`FUCKING_OPENCODE_USAGE_FILE` 支持绝对路径，也支持相对
+ * 状态目录的路径；未设置时保持旧行为 `<状态目录>/usage.jsonl`。
+ */
 function 用量文件路径() {
+  const raw = process.env.FUCKING_OPENCODE_USAGE_FILE;
+  if (raw !== undefined && String(raw).trim()) {
+    const value = String(raw).trim();
+    return path.isAbsolute(value) ? value : path.join(状态目录(), value);
+  }
   return path.join(状态目录(), "usage.jsonl");
 }
 
@@ -227,6 +237,36 @@ function 时间序列(记录, from, to) {
   return 桶;
 }
 
+/** 按出口/模型汇总近期结果：429、5xx、连续成功与最后 429 时间。 */
+function 诊断汇总({ hours = 24 } = {}) {
+  const 起 = Date.now() - Math.max(1, Number(hours) || 24) * 3600 * 1000;
+  const 全部 = 读历史().filter((r) => r.at >= 起);
+  const 聚合 = (字段) => {
+    const map = new Map();
+    for (const r of 全部) {
+      const 键 = String(r[字段] || "").slice(0, 80) || "(未知)";
+      const g = map.get(键) || {
+        key: 键, requests: 0, ok: 0, fail: 0, rate429: 0, count5xx: 0,
+        last429At: null, 连续成功: 0,
+      };
+      const ok = r.status >= 200 && r.status < 300;
+      g.requests += 1;
+      if (ok) { g.ok += 1; g.连续成功 += 1; }
+      else { g.fail += 1; g.连续成功 = 0; }
+      if (r.status === 429) { g.rate429 += 1; g.last429At = r.at || null; }
+      if (r.status >= 500 && r.status < 600) g.count5xx += 1;
+      map.set(键, g);
+    }
+    return [...map.values()].sort((a, b) => b.requests - a.requests);
+  };
+  return {
+    hours: Math.max(1, Number(hours) || 24),
+    total: 全部.length,
+    egress: 聚合("egress"),
+    models: 聚合("model"),
+  };
+}
+
 /** 清空历史。`before` 为毫秒时间戳时只删更早的。 */
 function 清空历史({ before = null } = {}) {
   try {
@@ -252,6 +292,7 @@ module.exports = {
   记录请求,
   读历史,
   汇总,
+  诊断汇总,
   清空历史,
   新请求标识,
   用量文件路径,
