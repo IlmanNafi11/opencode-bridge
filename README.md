@@ -60,11 +60,36 @@ free-tier gate inspects the TLS `ClientHello`, and the compiled OpenCode CLI is
 built on Bun. `ALLOW_NODE=1` exists only for offline tests with a mocked
 upstream.
 
+### Prebuilt archives
+
+Every release ships ready-to-run archives (source plus launch scripts, no build
+step) with a matching `.sha256` file:
+
+| Platform | Archive |
+| --- | --- |
+| Linux x86_64 | `fucking-opencode_v0.1.1_linux_amd64.tar.gz` |
+| Linux arm64 | `fucking-opencode_v0.1.1_linux_arm64.tar.gz` |
+| macOS Intel | `fucking-opencode_v0.1.1_darwin_amd64.tar.gz` |
+| macOS Apple silicon | `fucking-opencode_v0.1.1_darwin_arm64.tar.gz` |
+| Windows x86_64 | `fucking-opencode_v0.1.1_windows_amd64.zip` |
+| Windows arm64 | `fucking-opencode_v0.1.1_windows_arm64.zip` |
+
+```bash
+tar -xzf fucking-opencode_v0.1.1_linux_amd64.tar.gz
+cd fucking-opencode-0.1.1
+./fucking-opencode          # or: bun server.js
+```
+
+On Windows extract the zip and run `fucking-opencode.cmd` (or `bun server.js`).
+Bun 1.4+ must be on `PATH`; the launchers fail with an install hint otherwise.
+Verify a download first with `sha256sum -c <archive>.sha256` (Linux/macOS) or
+`Get-FileHash` (Windows).
+
 ### Dashboard login
 
 `/` and every admin API are behind a password gate when a panel password is
 configured. The password is entered without a username. On this install both
-the panel password and the downstream API key are **`kamuhitam`**; change either
+the panel password and the downstream API key are **`your-secret`**; change either
 under **设置 → 访问凭据**. When no panel password is stored and
 `PANEL_PASSWORD` is unset, the loopback panel stays open.
 
@@ -229,7 +254,7 @@ OpenAI wire format:
 ```python
 from openai import OpenAI
 
-client = OpenAI(base_url="http://127.0.0.1:20134/v1", api_key="kamuhitam")
+client = OpenAI(base_url="http://127.0.0.1:20134/v1", api_key="your-secret")
 response = client.chat.completions.create(
     model="mimo-v2.6-flash-free",
     messages=[{"role": "user", "content": "hello"}],
@@ -241,14 +266,14 @@ Anthropic wire format (Claude Code, Aider, and others):
 
 ```sh
 export ANTHROPIC_BASE_URL=http://127.0.0.1:20134
-export ANTHROPIC_AUTH_TOKEN=kamuhitam
+export ANTHROPIC_AUTH_TOKEN=your-secret
 ```
 
 curl:
 
 ```sh
 curl -s http://127.0.0.1:20134/v1/chat/completions \
-  -H 'Authorization: Bearer kamuhitam' \
+  -H 'Authorization: Bearer your-secret' \
   -H 'Content-Type: application/json' \
   -d '{"model":"mimo-v2.6-flash-free","messages":[{"role":"user","content":"ping"}],"stream":true}'
 ```
@@ -264,7 +289,7 @@ model_list:
     litellm_params:
       model: openai/mimo-v2.6-flash-free
       api_base: http://127.0.0.1:20134/v1
-      api_key: kamuhitam
+      api_key: your-secret
 ```
 
 ### 9Router
@@ -546,7 +571,7 @@ The model is deprecated or paid. Read `/v1/models` and switch.
 ### The panel asks for a password I do not know
 
 The value is in `<state dir>/settings.json` or in `PANEL_PASSWORD`. If both are
-empty, the panel is open. On this install the value is `kamuhitam`. Clear or
+empty, the panel is open. On this install the value is `your-secret`. Clear or
 rotate it under **设置 → 访问凭据**.
 
 ### A client gets `401` after changing the API key

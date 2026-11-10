@@ -15,3 +15,5 @@ bridge-err.txt
 bridge-log.txt
 bridge-out.log
 bridge-out-err.log
+
+dist/
