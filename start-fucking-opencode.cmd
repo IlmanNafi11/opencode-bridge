@@ -8,6 +8,12 @@ set PORT=20134
 set HOST=127.0.0.1
 set NODE_ENV=production
 set TOOL_PROFILE_SCOPE=full
+rem WARP farm: beberapa exit IP (userspace WireGuard) supaya kuota per-IP
+rem upstream tidak cepat habis. Port 40101+ dipakai karena 40001 sering
+rem ditempati container lain.
+set WARP_FARM=1
+set WARP_FARM_SIZE=8
+set WARP_FARM_BASE_PORT=40101
 rem 面板登录密码放在未跟踪的 panel-password.txt（每行一个密码）。
 if exist "%~dp0panel-password.txt" set /p PANEL_PASSWORD=<"%~dp0panel-password.txt"
 rem 必须用 Bun 运行：Node 会被运行时守卫拒绝（TLS 指纹基线）。

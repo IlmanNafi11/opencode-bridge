@@ -1068,11 +1068,14 @@ describe("server unit & integration tests", () => {
         return { retry: true, reason: "test-update" };
       };
       try {
+        const proxyMod = require("../proxy");
+        delete process.env.UPSTREAM_PROXY_POOL;
+        proxyMod.setPool({ entries: [] });
         const res = await httpRequest(port, "POST", "/v1/chat/completions", {
           model: "big-pickle",
           messages: [{ role: "user", content: "hi" }],
         });
-        assert.equal(calls, 1, "an IP-level block must not be replayed upstream");
+        assert.equal(calls, 1, "an IP-level block must not be replayed upstream without another exit");
         assert.equal(gateCalls, 0, "an IP-level block must not trigger an identity refresh");
         assert.equal(res.status, 403);
         assert.equal(res.headers["x-opencode-gate"], "ip-abuse");
@@ -1108,11 +1111,14 @@ describe("server unit & integration tests", () => {
         return { retry: true, reason: "test-update" };
       };
       try {
+        const proxyMod = require("../proxy");
+        delete process.env.UPSTREAM_PROXY_POOL;
+        proxyMod.setPool({ entries: [] });
         const res = await httpRequest(port, "POST", "/v1/chat/completions", {
           model: "big-pickle",
           messages: [{ role: "user", content: "hi" }],
         });
-        assert.equal(calls, 1, "the short abuse phrasing must be terminal too");
+        assert.equal(calls, 1, "the short abuse phrasing must be terminal too without another exit");
         assert.equal(gateCalls, 0);
         assert.equal(res.status, 403);
         assert.equal(res.headers["x-opencode-gate"], "ip-abuse");
@@ -1346,6 +1352,118 @@ describe("server unit & integration tests", () => {
         });
         assert.equal(second.status, 200);
         assert.deepEqual(usedEgress, ["http://second:2"]);
+      } finally {
+        proxy.setPool({ entries: [] });
+        proxy.resetHealth();
+        if (previousStateDir === undefined) delete process.env.FUCKING_OPENCODE_STATE_DIR;
+        else process.env.FUCKING_OPENCODE_STATE_DIR = previousStateDir;
+        proxy.__reload();
+        fs.rmSync(stateDir, { recursive: true, force: true });
+      }
+    });
+
+    it("moves to another pool entry when an egress is IP-blocked", async () => {
+      const fs = require("node:fs");
+      const os = require("node:os");
+      const path = require("node:path");
+      const proxy = require("../proxy");
+
+      const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "ofb-abuse-pool-"));
+      const previousStateDir = process.env.FUCKING_OPENCODE_STATE_DIR;
+      process.env.FUCKING_OPENCODE_STATE_DIR = stateDir;
+      delete process.env.UPSTREAM_PROXY_POOL;
+      proxy.__reload();
+      proxy.resetHealth();
+
+      try {
+        assert.equal(proxy.setPool({ entries: ["http://first:1", "http://second:2"], strategy: "failover" }).ok, true);
+        const usedEgress = [];
+        mockFetchImpl = async (_url, init) => {
+          const egress = init?.proxy || "direct";
+          usedEgress.push(egress);
+          if (egress === "http://first:1") {
+            return {
+              ok: false,
+              status: 403,
+              text: async () =>
+                JSON.stringify({
+                  type: "error",
+                  error: {
+                    type: "FreeTierError",
+                    message:
+                      "OpenCode's free models aren't available from your current network because we've detected abusive traffic from this IP address.",
+                  },
+                }),
+            };
+          }
+          return {
+            ok: true,
+            status: 200,
+            body: sseStreamFromLines([
+              'data: {"id":"1","choices":[{"index":0,"delta":{"content":"OK"},"finish_reason":"stop"}]}\n\n',
+              "data: [DONE]\n\n",
+            ]),
+          };
+        };
+
+        const res = await httpRequest(port, "POST", "/v1/chat/completions", {
+          model: "glm-5.3-flash-free",
+          messages: [{ role: "user", content: "abuse-pool" }],
+          stream: true,
+        });
+        assert.equal(res.status, 200, "a blocked exit must not decide the request");
+        assert.deepEqual(usedEgress, ["http://first:1", "http://second:2"]);
+        const firstEntry = proxy.describe().pool.entries.find((e) => e.host === "first:1");
+        assert.equal(firstEntry.state, "cooling");
+      } finally {
+        proxy.setPool({ entries: [] });
+        proxy.resetHealth();
+        if (previousStateDir === undefined) delete process.env.FUCKING_OPENCODE_STATE_DIR;
+        else process.env.FUCKING_OPENCODE_STATE_DIR = previousStateDir;
+        proxy.__reload();
+        fs.rmSync(stateDir, { recursive: true, force: true });
+      }
+    });
+
+    it("moves to another pool entry on upstream 5xx", async () => {
+      const fs = require("node:fs");
+      const os = require("node:os");
+      const path = require("node:path");
+      const proxy = require("../proxy");
+
+      const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "ofb-5xx-pool-"));
+      const previousStateDir = process.env.FUCKING_OPENCODE_STATE_DIR;
+      process.env.FUCKING_OPENCODE_STATE_DIR = stateDir;
+      delete process.env.UPSTREAM_PROXY_POOL;
+      proxy.__reload();
+      proxy.resetHealth();
+
+      try {
+        assert.equal(proxy.setPool({ entries: ["http://first:1", "http://second:2"], strategy: "failover" }).ok, true);
+        const usedEgress = [];
+        mockFetchImpl = async (_url, init) => {
+          const egress = init?.proxy || "direct";
+          usedEgress.push(egress);
+          if (egress === "http://first:1") {
+            return { ok: false, status: 503, text: async () => "" };
+          }
+          return {
+            ok: true,
+            status: 200,
+            body: sseStreamFromLines([
+              'data: {"id":"1","choices":[{"index":0,"delta":{"content":"OK"},"finish_reason":"stop"}]}\n\n',
+              "data: [DONE]\n\n",
+            ]),
+          };
+        };
+
+        const res = await httpRequest(port, "POST", "/v1/chat/completions", {
+          model: "glm-5.3-flash-free",
+          messages: [{ role: "user", content: "5xx-pool" }],
+          stream: true,
+        });
+        assert.equal(res.status, 200);
+        assert.deepEqual(usedEgress, ["http://first:1", "http://second:2"]);
       } finally {
         proxy.setPool({ entries: [] });
         proxy.resetHealth();

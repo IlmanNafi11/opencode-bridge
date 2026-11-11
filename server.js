@@ -244,6 +244,12 @@ const GATE_RETRY_COOLDOWN_MS = parseInt(
   process.env.GATE_RETRY_COOLDOWN_MS || "30000",
   10
 );
+// 单次客户端请求最多换几条出口。免费额度按 IP 记，所以 429/IP 封锁/5xx
+// 在换到新出口时还有成功机会；0 关闭。上限 10 防止配置失误打爆池。
+const 最大出口重试 = (() => {
+  const n = parseInt(process.env.UPSTREAM_EGRESS_RETRIES || "3", 10);
+  return Number.isFinite(n) ? Math.min(Math.max(n, 0), 10) : 3;
+})();
 const CORS_ORIGIN = process.env.CORS_ORIGIN !== undefined ? process.env.CORS_ORIGIN : "";
 // 可选 API key 门禁。默认关闭（本桥是本地工具，历史行为不变）。
 // 密钥来源：面板保存的文件优先，其次是 FUCKING_OPENCODE_API_KEYS 的第一个值。
@@ -978,6 +984,26 @@ function 记录出口失败(state, { reason, cooldownMs = null } = {}) {
   if (!pool || !pool.active) return;
   proxy.markFailure(url, { reason, cooldownMs });
   可能轮换WARP出口(url, reason);
+}
+
+/**
+ * 把当前出口记为失败并切到下一条健康出口，供同一次客户端请求重试。
+ * 返回 false 表示没有可用的替代（无池、只剩一条、池全部冷却到同一条）。
+ * 预算按请求计，避免一次请求把整池全部烧掉。
+ */
+function 换一条出口(state, { reason, cooldownMs = null } = {}) {
+  if (!state) return false;
+  const pool = proxy.describe().pool;
+  if (!pool || !pool.active || pool.enabled <= 1) return false;
+  const used = Number(state.egressSwaps) || 0;
+  if (used >= 最大出口重试) return false;
+  记录出口失败(state, { reason, cooldownMs });
+  const next = proxy.pick({ exclude: state.egressUrl });
+  if (!next || next.url === state.egressUrl) return false;
+  state.egress = next;
+  state.egressUrl = next.url;
+  state.egressSwaps = used + 1;
+  return true;
 }
 
 /**
@@ -3473,7 +3499,7 @@ async function 处理请求主体(req, res) {
 
       // 每个客户端请求一个出口。模型回退共用同一出口 —— 上游把重试
       // 绑在见过首次尝试的地址上；只有代理不可达或网关点名出口时才换。
-      const egressState = { egress: proxy.pick(), egressUrl: null, transportFailures: 0 };
+      const egressState = { egress: proxy.pick(), egressUrl: null, transportFailures: 0, egressSwaps: 0 };
       egressState.egressUrl = egressState.egress.url;
       egressStateRef = () => egressState.egress;
       // 兼容路由自call 时从这里读出口标签。必须在任何 writeHead 之前 set。
@@ -3592,42 +3618,29 @@ async function 处理请求主体(req, res) {
 
         // 池出口上额度耗尽。429 意味着传输与请求形状都被接受，只有这个
         // IP 的配额没了，唯一有用的动作是把重试花在另一个 IP 上，而不是
-        // 向上游刚拒绝的地址重放同一请求。无论哪种都记冷却，下一个请求
+        // 向上游刚拒绝的地址重放同一请求。预算内换多条，直到成功或用尽。
         if (!upstreamRes.ok && upstreamRes.status === 429) {
           const poolState = proxy.describe().pool;
-          const canFailover = poolState && poolState.active && poolState.enabled > 1;
-          记录出口失败(egressState, {
-            reason: "allowance 429",
-            cooldownMs: poolState ? poolState.cooldownMs * 4 : null,
-          });
-          if (canFailover) {
-            const next = proxy.pick({ exclude: egressState.egressUrl });
-            if (next.url !== egressState.egressUrl) {
-              console.warn(
-                `[fucking-opencode] 出口 ${
-                  proxy.displayHost(egressState.egressUrl) || "direct"
-                } 额度用尽（429）；改经 ${
-                  proxy.displayHost(next.url) || "direct"
-                } 重试`
-              );
-              egressState.egress = next;
-              egressState.egressUrl = next.url;
-              upstreamRes = await 出口抓取(upstreamUrl, {
-                method: "POST",
-                headers: upstreamHeaders,
-                body: JSON.stringify(upstreamBody),
-                signal: abortController.signal,
-              }, egressState);
-              consumedErrorText = null;
-              // 重试可能落在第二个被烧的 IP 上。也记下来，否则下一个请求
-              // 会再选中它并学到同一件事。
-              if (upstreamRes.status === 429) {
-                记录出口失败(egressState, {
-                  reason: "allowance 429",
-                  cooldownMs: poolState.cooldownMs * 4,
-                });
-              }
-            }
+          const cooldownMs = poolState ? poolState.cooldownMs * 4 : null;
+          while (
+            upstreamRes.status === 429 &&
+            换一条出口(egressState, { reason: "allowance 429", cooldownMs })
+          ) {
+            console.warn(
+              `[fucking-opencode] 出口额度用尽（429）；改经 ${
+                proxy.displayHost(egressState.egressUrl) || "direct"
+              } 重试（已换 ${egressState.egressSwaps}/${最大出口重试}）`
+            );
+            upstreamRes = await 出口抓取(upstreamUrl, {
+              method: "POST",
+              headers: upstreamHeaders,
+              body: JSON.stringify(upstreamBody),
+              signal: abortController.signal,
+            }, egressState);
+            consumedErrorText = null;
+          }
+          if (upstreamRes.status === 429) {
+            记录出口失败(egressState, { reason: "allowance 429", cooldownMs });
           }
         }
 
@@ -3650,6 +3663,13 @@ async function 处理请求主体(req, res) {
               (firstLogId ? ` [x-opencode-log-id: ${firstLogId}]` : "") +
               `；换新会话重试一次`
           );
+          if (换一条出口(egressState, { reason: `upstream ${first5xx}` })) {
+            console.warn(
+              `[fucking-opencode] 5xx 出口改经 ${
+                proxy.displayHost(egressState.egressUrl) || "direct"
+              } 重试（已换 ${egressState.egressSwaps}/${最大出口重试}）`
+            );
+          }
           upstreamRes = await 上游抓取(upstreamUrl, {
             method: "POST",
             headers: retry5xxHeaders,
@@ -3662,7 +3682,8 @@ async function 处理请求主体(req, res) {
         // 自愈身份。网关拒绝靠错误*体*识别，不在状态行：403 只有在其
         // type 或消息这么说时才是网关，而 426 本身就是版本下限握手。
         // 所以必须先读体再决策 —— 在这里传空字符串曾让 403 的分支不可达。
-        if (!upstreamRes.ok) {
+        错误处理: for (;;) {
+          if (upstreamRes.ok) break 错误处理;
           let errText = consumedErrorText ?? "";
           if (consumedErrorText === null) {
             try {
@@ -3688,18 +3709,51 @@ async function 处理请求主体(req, res) {
           // 不同的失败：网关已标记本网络，刷新配方、铸造新会话 id、重放
           // 请求都改变不了答案。对网关自己的报告实测：官方 CLI 从同一
           // IP 得到同样拒绝。原样返回，身份层不动。
+          // IP 封锁按出口 IP 记账，不是按账号或形态：池里还有别的出口时，
+          // 换一条重试可能直接成功；全部换完仍封锁才原样上报。
           if (identity.isIpAbuseRejection(upstreamRes.status, rawMsg)) {
-            // 封锁按本网络 IP 记账，所以问题在这个出口：停用它，
-            // 下一个请求从另一条出去。
-            记录出口失败(egressState, { reason: "ip-abuse block" });
-            return 回应IP滥用(
-              res,
-              upstreamRes.status,
-              errType,
-              rawMsg,
-              上游日志ID之(upstreamRes),
-              targetModel
-            );
+            let lastStatus = upstreamRes.status;
+            let lastType = errType;
+            let lastMsg = rawMsg;
+            let lastLogId = 上游日志ID之(upstreamRes);
+            while (!upstreamRes.ok && 换一条出口(egressState, { reason: "ip-abuse block" })) {
+              console.warn(
+                `[fucking-opencode] 出口被按 IP 封锁（${lastStatus}）；改经 ${
+                  proxy.displayHost(egressState.egressUrl) || "direct"
+                } 重试（已换 ${egressState.egressSwaps}/${最大出口重试}）`
+              );
+              upstreamRes = await 出口抓取(upstreamUrl, {
+                method: "POST",
+                headers: upstreamHeaders,
+                body: JSON.stringify(upstreamBody),
+                signal: abortController.signal,
+              }, egressState);
+              consumedErrorText = null;
+              if (upstreamRes.ok) break;
+              let abuseText = "";
+              try {
+                abuseText = await upstreamRes.text();
+              } catch {}
+              consumedErrorText = abuseText;
+              let abuseJson = null;
+              try {
+                abuseJson = JSON.parse(abuseText);
+              } catch {}
+              lastStatus = upstreamRes.status;
+              lastType = abuseJson?.error?.type || abuseJson?.type || "";
+              lastMsg =
+                abuseJson?.error?.message ||
+                abuseJson?.message ||
+                abuseText ||
+                `Upstream error ${upstreamRes.status}`;
+              lastLogId = 上游日志ID之(upstreamRes);
+              if (!identity.isIpAbuseRejection(lastStatus, lastMsg)) break;
+            }
+            if (upstreamRes.ok) break 错误处理;
+            if (identity.isIpAbuseRejection(lastStatus, lastMsg)) {
+              return 回应IP滥用(res, lastStatus, lastType, lastMsg, lastLogId, targetModel);
+            }
+            continue 错误处理;
           }
 
           if (!是免费档CLI网关错误(upstreamRes.status, errType, rawMsg)) {
@@ -3957,6 +4011,7 @@ async function 处理请求主体(req, res) {
               })
             );
           }
+          break;
         }
 
         上次失败网关重试时间 = 0;

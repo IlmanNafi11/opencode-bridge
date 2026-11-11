@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.5] — 2026-11-11
+
+Free-tier resilience, modelled on how opencode2api survives per-IP quota:
+
+- A client request now rotates through pool exits on `429`, IP-level `403`,
+  and `5xx` instead of replaying the exhausted IP. `UPSTREAM_EGRESS_RETRIES`
+  (default `3`, `0` disables) bounds the swaps per request; each failed exit is
+  parked in the pool's cooldown and the WARP lane rotation still fires.
+- IP-abuse `403` is no longer unconditionally terminal: with another exit it is
+  retried there and only reported verbatim after the budget is spent.
+- `start-fucking-opencode.cmd` launches the WARP farm (`WARP_FARM=1`, size 8,
+  base port 40101) so a default install has several egress IPs.
+
 ## [0.1.4] — 2026-11-11
 
 Operational hardening: per-key limits, observability, backup/restore, TLS, and

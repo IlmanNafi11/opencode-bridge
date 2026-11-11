@@ -66,16 +66,16 @@ step) with a matching `.sha256` file:
 
 | Platform | Archive |
 | --- | --- |
-| Linux x86_64 | `fucking-opencode_v0.1.4_linux_amd64.tar.gz` |
-| Linux arm64 | `fucking-opencode_v0.1.4_linux_arm64.tar.gz` |
-| macOS Intel | `fucking-opencode_v0.1.4_darwin_amd64.tar.gz` |
-| macOS Apple silicon | `fucking-opencode_v0.1.4_darwin_arm64.tar.gz` |
-| Windows x86_64 | `fucking-opencode_v0.1.4_windows_amd64.zip` |
-| Windows arm64 | `fucking-opencode_v0.1.4_windows_arm64.zip` |
+| Linux x86_64 | `fucking-opencode_v0.1.5_linux_amd64.tar.gz` |
+| Linux arm64 | `fucking-opencode_v0.1.5_linux_arm64.tar.gz` |
+| macOS Intel | `fucking-opencode_v0.1.5_darwin_amd64.tar.gz` |
+| macOS Apple silicon | `fucking-opencode_v0.1.5_darwin_arm64.tar.gz` |
+| Windows x86_64 | `fucking-opencode_v0.1.5_windows_amd64.zip` |
+| Windows arm64 | `fucking-opencode_v0.1.5_windows_arm64.zip` |
 
 ```bash
-tar -xzf fucking-opencode_v0.1.4_linux_amd64.tar.gz
-cd fucking-opencode-0.1.4
+tar -xzf fucking-opencode_v0.1.5_linux_amd64.tar.gz
+cd fucking-opencode-0.1.5
 ./fucking-opencode          # or: bun server.js
 ```
 
@@ -232,6 +232,7 @@ docker run -d --name fucking-opencode \
 | `MAX_INFLIGHT` | `64` | Concurrent inference cap; `0` disables the gate |
 | `MAX_INFLIGHT_WAIT_MS` | `30000` | Queue wait before `429 gateway_busy`; `0` fails immediately |
 | `METRICS_TOKEN` | *(unset)* | Require `Authorization: Bearer` on `/metrics` |
+| `UPSTREAM_EGRESS_RETRIES` | `3` | Exit swaps per request when the upstream answers `429`, an IP-level `403`, or `5xx`; `0` disables. |
 | `PANEL_TLS_CERT` / `PANEL_TLS_KEY` | *(unset)* | Serve panel, API, and inference over HTTPS on both listeners when both are set |
 
 Changing a credential or proxy in the panel applies immediately. Other
