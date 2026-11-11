@@ -241,14 +241,9 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 
 .usage-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(146px, 1fr)); gap: 10px; margin: 14px 0 16px; }
 .usage-kpi { position: relative; padding: 14px 16px 12px; border: 1px solid var(--rule); border-radius: 10px; background: var(--surface); overflow: hidden; }
-.usage-kpi::before { content: ""; position: absolute; inset: 0 0 auto; height: 3px; background: var(--tone, var(--accent)); }
 .usage-kpi-label { display: block; color: var(--muted); font: 600 10.5px/1.4 var(--mono); letter-spacing: .08em; text-transform: uppercase; }
-.usage-kpi-value { display: block; margin-top: 6px; font: 600 1.5rem/1.15 var(--mono); letter-spacing: -.01em; color: var(--tone, var(--ink)); }
+.usage-kpi-value { display: block; margin-top: 6px; font: 600 1.5rem/1.15 var(--mono); letter-spacing: -.01em; color: var(--ink); }
 .usage-kpi-sub { display: block; margin-top: 4px; color: var(--muted); font-size: 11.5px; }
-.usage-kpi[data-tone="input"], .usage-kpi[data-tone="requests"] { --tone: #5b8def; }
-.usage-kpi[data-tone="cached"] { --tone: #22c55e; }
-.usage-kpi[data-tone="output"] { --tone: #a855f7; }
-.usage-kpi[data-tone="cost"] { --tone: #f59e0b; }
 .usage-grid { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); gap: 12px; margin-bottom: 12px; }
 @media (max-width: 900px) { .usage-grid { grid-template-columns: minmax(0, 1fr); } }
 .usage-panel { border: 1px solid var(--rule); border-radius: 12px; background: var(--surface); padding: 14px 16px 16px; }
@@ -270,9 +265,8 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 .usage-chart { width: 100%; height: 240px; margin-top: 10px; overflow: visible; }
 .usage-chart .grid-line { stroke: var(--rule); stroke-width: 1; }
 .usage-chart .axis-text { fill: var(--muted); font: 10.5px var(--mono); }
-.usage-chart .traffic-area { fill: var(--accent); fill-opacity: .14; }
-.usage-chart .traffic-line { stroke: var(--ink); stroke-width: 1.8; fill: none; }
-.usage-chart .traffic-dot { fill: var(--surface); stroke: var(--ink); stroke-width: 1.6; }
+.usage-chart .traffic-bar { fill: var(--muted); }
+.usage-chart .traffic-bar:hover { fill: var(--ink); }
 .usage-empty { display: grid; place-items: center; min-height: 200px; color: var(--muted); font-size: 13px; }
 .usage-requests { margin-top: 12px; }
 .usage-scope { color: var(--muted); font: 11px/1.5 var(--mono); margin: 0; }
@@ -1546,17 +1540,15 @@ function renderUsageKpis(stats) {
   const 命中率 = stats.input_tokens ? ((stats.cached_tokens / stats.input_tokens) * 100).toFixed(1) + "%" : "0.0%";
   const 客户端 = stats.client_count ? " · " + stats.client_count + " " + tr("个客户端") : "";
   const cards = [
-    ["requests", "请求数", fmtNum(stats.total), stats.ok + " " + tr("成功") + " · " + stats.fail + " " + tr("失败") + 客户端],
-    ["input", "输入词元", fmtTokens(stats.input_tokens), "提示词词元"],
-    ["cached", "缓存词元", fmtTokens(stats.cached_tokens), 命中率 + " " + tr("缓存命中")],
-    ["output", "输出词元", fmtTokens(stats.output_tokens), "生成的补全"],
-    ["cost", "预估费用", "$0.00", "免费模型，不计费"],
+    ["请求数", fmtNum(stats.total), stats.ok + " " + tr("成功") + " · " + stats.fail + " " + tr("失败") + 客户端],
+    ["输入词元", fmtTokens(stats.input_tokens), "提示词词元"],
+    ["缓存词元", fmtTokens(stats.cached_tokens), 命中率 + " " + tr("缓存命中")],
+    ["输出词元", fmtTokens(stats.output_tokens), "生成的补全"],
   ];
   box.replaceChildren(
-    ...cards.map(([tone, label, value, sub]) => {
+    ...cards.map(([label, value, sub]) => {
       const card = document.createElement("div");
       card.className = "usage-kpi";
-      card.dataset.tone = tone;
       const name = document.createElement("span");
       name.className = "usage-kpi-label";
       name.textContent = label;
@@ -1586,7 +1578,7 @@ function renderUsageTraffic() {
   const 指标 = 用量视图.流量;
   const 取值 = (p) =>
     指标 === "requests" ? p.requests || 0 : 指标 === "cached" ? p.cached || 0 : (p.input || 0) + (p.output || 0);
-  const points = series.map((p) => ({ t: p.t, v: 取值(p) }));
+  const points = series.map((p) => ({ t: p.t, v: 取值(p), raw: p }));
   if (!points.length || !points.some((p) => p.v > 0)) {
     const empty = document.createElement("div");
     empty.className = "usage-empty";
@@ -1643,22 +1635,26 @@ function renderUsageTraffic() {
     svg.append(lineEl, text);
   }
 
-  const 线 = points.map((p, i) => x(i) + "," + y(p.v)).join("L");
-  const area = document.createElementNS(ns, "path");
-  area.setAttribute("d", "M" + 线 + "L" + x(points.length - 1) + "," + base + "L" + x(0) + "," + base + "Z");
-  area.setAttribute("class", "traffic-area");
-  const line = document.createElementNS(ns, "path");
-  line.setAttribute("d", "M" + 线);
-  line.setAttribute("class", "traffic-line");
-  svg.append(area, line);
-
+  const gap = points.length === 1 ? innerW : x(1) - x(0);
+  const barW = Math.max(2, Math.min(18, gap * 0.6));
+  for (let i = 0; i < points.length; i += 1) {
+    const p = points[i];
+    const h = Math.max(p.v > 0 ? 2 : 1.5, base - y(p.v));
+    const bar = document.createElementNS(ns, "rect");
+    bar.setAttribute("x", x(i) - barW / 2);
+    bar.setAttribute("y", base - h);
+    bar.setAttribute("width", barW);
+    bar.setAttribute("height", h);
+    bar.setAttribute("rx", 1.5);
+    bar.setAttribute("class", "traffic-bar");
+    const title = document.createElementNS(ns, "title");
+    title.textContent =
+      new Date(p.t).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }) +
+      " · " + label(p.v) + (指标 === "tokens" ? "（输入 " + fmtTokens(p.raw.input || 0) + " / 输出 " + fmtTokens(p.raw.output || 0) + "）" : "");
+    bar.append(title);
+    svg.append(bar);
+  }
   const last = points.length - 1;
-  const dot = document.createElementNS(ns, "circle");
-  dot.setAttribute("cx", x(last));
-  dot.setAttribute("cy", y(points[last].v));
-  dot.setAttribute("r", 3.2);
-  dot.setAttribute("class", "traffic-dot");
-  svg.append(dot);
 
   const marks = [0, Math.floor(points.length / 2), last];
   for (const i of [...new Set(marks)]) {

@@ -42,6 +42,9 @@ Multi-key credentials, an optional admin port, and a movable usage ledger.
 - Favicon: the panel and login pages link `/panel-avatar.png`, `GET /favicon.ico`
   serves the same bytes before auth, and the avatar ships through both the
   installer and the self-updater.
+- Stats page restyled to a monochrome look: the four usage KPI cards drop the
+  colored accent bars (the cost card is gone), and the traffic chart renders
+  gray bars per time bucket with hover breakdowns instead of a line chart.
 
 Anthropic and Responses protocols, usage history, opt-in API keys.
 
