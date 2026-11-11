@@ -81,6 +81,30 @@ describe("panel-settings 多密钥", () => {
     assert.equal(settings.updateApiKey(envKey.id, { enabled: false }).ok, false);
   });
 
+  it("收窄并持久化每 key 限额，matchApiKey 回传限额", () => {
+    const added = settings.addApiKey({ label: "lim", key: "limit-key-99", rpm: 999, daily: -5, models: ["m1", "", "m2"] });
+    assert.equal(added.ok, true);
+    const entry = settings.listApiKeys()[0];
+    assert.equal(entry.rpm, 600);
+    assert.equal(entry.daily, 0);
+    assert.deepEqual(entry.models, ["m1", "m2"]);
+
+    const saved = 读文件();
+    assert.equal(saved.apiKeys[0].rpm, 600);
+    assert.deepEqual(saved.apiKeys[0].models, ["m1", "m2"]);
+    assert.equal(saved.apiKeys[0].daily, undefined);
+
+    const matched = settings.matchApiKey("limit-key-99");
+    assert.equal(matched.rpm, 600);
+    assert.deepEqual(matched.models, ["m1", "m2"]);
+
+    assert.equal(settings.updateApiKey(entry.id, { rpm: 5, daily: 100, models: [] }).ok, true);
+    const after = settings.matchApiKey("limit-key-99");
+    assert.equal(after.rpm, 5);
+    assert.equal(after.daily, 100);
+    assert.deepEqual(after.models, []);
+  });
+
   it("文件写入保持 0600 且包含全部条目", () => {
     settings.addApiKey({ label: "one", key: "first-key-1" });
     settings.addApiKey({ label: "two", key: "second-key-2" });

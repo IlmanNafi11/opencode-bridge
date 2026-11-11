@@ -95,7 +95,7 @@ describe("panel login", () => {
 
     const ok = await request("POST", "/api/login", { password: "test-secret" });
     assert.equal(ok.status, 200);
-    assert.match(String(ok.headers["set-cookie"]), /^ofb_panel=[a-f0-9]{64};/);
+    assert.match(String(ok.headers["set-cookie"]), /^ofb_panel=\d+\.[a-f0-9]{32}\.[a-f0-9]{64};/);
     assert.match(String(ok.headers["set-cookie"]), /HttpOnly/);
   });
 

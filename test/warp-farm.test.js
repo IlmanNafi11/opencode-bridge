@@ -51,9 +51,12 @@ describe("warp-farm bridge", () => {
     try {
       const saved = farm.saveSettings({ size: 3, basePort: 41001, stack: "ipv4" });
       assert.equal(saved.ok, true);
-      assert.deepStrictEqual(farm.settings(), { size: 3, basePort: 41001, stack: "ipv4", sourceIpv6: "" });
+      assert.deepStrictEqual(farm.settings(), { size: 3, basePort: 41001, stack: "ipv4", sourceIpv6: "", watchdog: true });
       const onDisk = JSON.parse(fs.readFileSync(path.join(dir, "warp-farm.json"), "utf8"));
       assert.equal(onDisk.size, 3);
+      assert.equal(farm.saveSettings({ watchdog: false }).ok, true);
+      assert.equal(farm.settings().watchdog, false);
+      assert.equal(farm.saveSettings({ watchdog: true }).ok, true);
       assert.equal(farm.saveSettings({ stack: "bogus" }).ok, false);
       assert.equal(farm.saveSettings({ size: 99 }).ok, false);
       assert.equal(farm.settings().size, 3);

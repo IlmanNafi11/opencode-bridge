@@ -209,7 +209,6 @@ function panelPassword() {
 }
 const PANEL_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 const PANEL_SESSION_COOKIE = "ofb_panel";
-const panelSessions = new Map();
 const panelLoginFailures = new Map();
 
 // ---- 事件环：捕获本进程日志行，喂给面板的「事件流」标签页。 ----
@@ -256,10 +255,16 @@ function 默认模型值() {
 }
 /** 接口密钥检查：返回 null（通过）或 401 响应体。 */
 function 检查API密钥(req) {
-  if (!panelSettings.hasApiKeys()) return null;
+  // 协议兼容路由的内部自调用已在入口校验过；不再重复计费或计限额。
+  if (是内部调用(req)) return null;
+  if (!panelSettings.hasApiKeys()) {
+    req.__apiKeyModels = null;
+    return null;
+  }
   // 面板会话已用密码登录，测试台同源调用直接放行，避免在浏览器里暴露 API key。
   if (panelPassword() && panelAuthorized(req)) {
     req.__apiKeyLabel = "panel";
+    req.__apiKeyModels = null;
     return null;
   }
   const raw = req.headers?.authorization || "";
@@ -268,6 +273,9 @@ function 检查API密钥(req) {
   const matched = panelSettings.matchApiKey(token);
   if (!matched) return { error: { message: "API key 无效", type: "authentication_error", code: "invalid_api_key" } };
   req.__apiKeyLabel = matched.label;
+  req.__apiKeyModels = Array.isArray(matched.models) ? matched.models : null;
+  const 超限 = 检查密钥额度(matched);
+  if (超限) return { error: 超限.error, __status: 超限.status, __retryAfter: 超限.retryAfter };
   return null;
 }
 /** 入站客户端地址：去掉 IPv6-mapped 前缀；只用于本机分面统计。 */
@@ -289,6 +297,327 @@ function 用量标签(req) {
     key_label: label,
   };
 }
+
+/** 环境整数：非法或越界时回落到默认值。 */
+function 环境整数(name, 默认值, 最小, 最大) {
+  const raw = Number(process.env[name]);
+  if (!Number.isFinite(raw)) return 默认值;
+  return Math.min(Math.max(Math.floor(raw), 最小), 最大);
+}
+
+// --- 内部自调用令牌 ---
+// 协议兼容路由（Anthropic / Responses）会把请求回打本机的
+// /v1/chat/completions。那个内部跳转必须跳过下游 key 校验、额度计数与
+// 并发闸门，否则一次客户端请求会被记两次、或在排队时死锁。
+const 内部令牌 = crypto.randomBytes(16).toString("hex");
+
+function 是内部调用(req) {
+  const hop = String(req.headers?.["x-internal-hop"] || "");
+  if (hop.length !== 内部令牌.length) return false;
+  if (!crypto.timingSafeEqual(Buffer.from(hop), Buffer.from(内部令牌))) return false;
+  const ip = String(req.socket?.remoteAddress || "").replace(/^::ffff:/, "");
+  return ip === "127.0.0.1" || ip === "::1";
+}
+
+// --- 推理并发闸门 ---
+// 上游对突发很敏感：限制同时在途的推理请求，超出后排队，等待超时回 429。
+// MAX_INFLIGHT=0 关闭（默认 64），MAX_INFLIGHT_WAIT_MS 控制排队上限（默认 30s）。
+let 在途推理 = 0;
+const 并发等待队列 = [];
+
+/** 申请一个推理槽；返回释放函数，超时返回 null。 */
+function 申请并发槽() {
+  const 上限 = 环境整数("MAX_INFLIGHT", 64, 0, 4096);
+  if (上限 === 0) return Promise.resolve(() => {});
+  if (在途推理 < 上限) {
+    在途推理 += 1;
+    return Promise.resolve(释放并发槽);
+  }
+  const 等待毫秒 = 环境整数("MAX_INFLIGHT_WAIT_MS", 30000, 0, 300000);
+  return new Promise((resolve) => {
+    let done = false;
+    const 唤醒 = () => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      在途推理 += 1;
+      resolve(释放并发槽);
+    };
+    const timer = 等待毫秒 > 0
+      ? setTimeout(() => {
+          if (done) return;
+          done = true;
+          const index = 并发等待队列.indexOf(唤醒);
+          if (index >= 0) 并发等待队列.splice(index, 1);
+          resolve(null);
+        }, 等待毫秒)
+      : null;
+    并发等待队列.push(唤醒);
+  });
+}
+
+function 释放并发槽() {
+  在途推理 = Math.max(0, 在途推理 - 1);
+  const 下一个 = 并发等待队列.shift();
+  if (下一个) 下一个();
+}
+
+/** 响应结束时释放槽位，finish 与 close 只生效一次。 */
+function 挂接并发释放(res, release) {
+  if (!release) return;
+  let released = false;
+  const once = () => {
+    if (released) return;
+    released = true;
+    release();
+  };
+  res.once("finish", once);
+  res.once("close", once);
+}
+
+// --- 下游 key 额度与模型白名单 ---
+// 条目字段：rpm（每分钟请求数，0 = 不限）、daily（24 小时请求数，0 = 不限）、
+// models（允许的模型 id 列表，空 = 全放行）。计数只存在内存里，重启归零。
+const 密钥计数 = new Map();
+const 分钟窗口毫秒 = 60 * 1000;
+const 日窗口毫秒 = 24 * 60 * 60 * 1000;
+
+function 取密钥计数(label) {
+  const now = Date.now();
+  let entry = 密钥计数.get(label);
+  if (!entry) {
+    entry = { 分钟起点: now, 分钟次数: 0, 日起点: now, 日次数: 0 };
+    密钥计数.set(label, entry);
+  }
+  if (now - entry.分钟起点 >= 分钟窗口毫秒) {
+    entry.分钟起点 = now;
+    entry.分钟次数 = 0;
+  }
+  if (now - entry.日起点 >= 日窗口毫秒) {
+    entry.日起点 = now;
+    entry.日次数 = 0;
+  }
+  return entry;
+}
+
+/** 记一次请求并检查限额；超限返回 { status, error, retryAfter }。 */
+function 检查密钥额度(matched) {
+  const rpm = Number(matched?.rpm) || 0;
+  const daily = Number(matched?.daily) || 0;
+  if (!rpm && !daily) return null;
+  const entry = 取密钥计数(matched.label);
+  entry.分钟次数 += 1;
+  entry.日次数 += 1;
+  const now = Date.now();
+  if (rpm && entry.分钟次数 > rpm) {
+    return {
+      status: 429,
+      retryAfter: Math.max(1, Math.ceil((entry.分钟起点 + 分钟窗口毫秒 - now) / 1000)),
+      error: {
+        message: `API key「${matched.label}」超出每分钟 ${rpm} 次限制。`,
+        type: "rate_limit_error",
+        code: "key_rate_limited",
+      },
+    };
+  }
+  if (daily && entry.日次数 > daily) {
+    return {
+      status: 429,
+      retryAfter: Math.max(1, Math.ceil((entry.日起点 + 日窗口毫秒 - now) / 1000)),
+      error: {
+        message: `API key「${matched.label}」超出 24 小时 ${daily} 次限制。`,
+        type: "rate_limit_error",
+        code: "key_quota_exceeded",
+      },
+    };
+  }
+  return null;
+}
+
+/** 模型白名单；条目未配置 models 时放行。 */
+function 检查模型许可(req, model) {
+  const list = req?.__apiKeyModels;
+  if (!Array.isArray(list) || list.length === 0) return null;
+  const name = String(model || "");
+  if (list.includes(name)) return null;
+  return {
+    message: `API key 不允许模型「${name}」。`,
+    type: "invalid_request_error",
+    code: "model_not_allowed",
+  };
+}
+
+// --- Prometheus 指标 ---
+function 渲染指标() {
+  const now = Date.now();
+  const since = now - 日窗口毫秒;
+  let rows = [];
+  try {
+    rows = 用量统计 && 用量统计.读历史 ? 用量统计.读历史().filter((r) => r.at >= since) : [];
+  } catch {}
+  const 桶 = { ok: 0, client: 0, server: 0 };
+  let input = 0;
+  let cached = 0;
+  let output = 0;
+  let ms = 0;
+  let ttft = 0;
+  let ttftCount = 0;
+  for (const row of rows) {
+    const status = Number(row.status) || 0;
+    if (status >= 200 && status < 300) 桶.ok += 1;
+    else if (status >= 400 && status < 500) 桶.client += 1;
+    else if (status >= 500) 桶.server += 1;
+    input += Number(row.input_tokens) || 0;
+    cached += Number(row.cached_tokens) || 0;
+    output += Number(row.output_tokens) || 0;
+    ms += Number(row.ms) || 0;
+    if (Number.isFinite(row.ttft_ms)) {
+      ttft += row.ttft_ms;
+      ttftCount += 1;
+    }
+  }
+  let pool = { mode: "direct", ready: 0, enabled: 0, cooling: 0 };
+  try { pool = proxy.describe(); } catch {}
+  let farm = { running: false, lanes: [] };
+  try { farm = warpFarm.状态() || farm; } catch {}
+  const lanes = Array.isArray(farm.lanes) ? farm.lanes : [];
+  const laneReady = lanes.filter((l) => l && (l.state === "ready" || l.ok === true)).length;
+  const lines = [
+    "# HELP fucking_opencode_requests_24h Requests recorded in the last 24 hours by outcome.",
+    "# TYPE fucking_opencode_requests_24h counter",
+    `fucking_opencode_requests_24h{outcome="ok"} ${桶.ok}`,
+    `fucking_opencode_requests_24h{outcome="client_error"} ${桶.client}`,
+    `fucking_opencode_requests_24h{outcome="server_error"} ${桶.server}`,
+    "# HELP fucking_opencode_tokens_24h Tokens recorded in the last 24 hours.",
+    "# TYPE fucking_opencode_tokens_24h counter",
+    `fucking_opencode_tokens_24h{kind="input"} ${input}`,
+    `fucking_opencode_tokens_24h{kind="cached"} ${cached}`,
+    `fucking_opencode_tokens_24h{kind="output"} ${output}`,
+    "# HELP fucking_opencode_request_duration_ms_24h Sum of request durations in the last 24 hours.",
+    "# TYPE fucking_opencode_request_duration_ms_24h counter",
+    `fucking_opencode_request_duration_ms_24h ${ms}`,
+    "# HELP fucking_opencode_ttft_ms_24h Sum of time-to-first-token samples in the last 24 hours.",
+    "# TYPE fucking_opencode_ttft_ms_24h counter",
+    `fucking_opencode_ttft_ms_24h ${ttft}`,
+    `fucking_opencode_ttft_samples_24h ${ttftCount}`,
+    "# HELP fucking_opencode_inflight Inference requests currently in flight.",
+    "# TYPE fucking_opencode_inflight gauge",
+    `fucking_opencode_inflight ${在途推理}`,
+    "# HELP fucking_opencode_gateway_uptime_seconds Process uptime.",
+    "# TYPE fucking_opencode_gateway_uptime_seconds gauge",
+    `fucking_opencode_gateway_uptime_seconds ${Math.floor(process.uptime())}`,
+    "# HELP fucking_opencode_egress_mode Current egress mode (1 = active).",
+    "# TYPE fucking_opencode_egress_mode gauge",
+    `fucking_opencode_egress_mode{mode="direct"} ${pool.mode === "direct" ? 1 : 0}`,
+    `fucking_opencode_egress_mode{mode="proxy"} ${pool.mode === "proxy" ? 1 : 0}`,
+    `fucking_opencode_egress_mode{mode="pool"} ${pool.mode === "pool" ? 1 : 0}`,
+    "# HELP fucking_opencode_pool_entries Proxy pool entries by state.",
+    "# TYPE fucking_opencode_pool_entries gauge",
+    `fucking_opencode_pool_entries{state="enabled"} ${pool.enabled || 0}`,
+    `fucking_opencode_pool_entries{state="ready"} ${pool.ready || 0}`,
+    `fucking_opencode_pool_entries{state="cooling"} ${pool.cooling || 0}`,
+    "# HELP fucking_opencode_farm_lanes WARP farm lanes.",
+    "# TYPE fucking_opencode_farm_lanes gauge",
+    `fucking_opencode_farm_lanes{state="ready"} ${laneReady}`,
+    `fucking_opencode_farm_lanes{state="total"} ${lanes.length}`,
+    "",
+  ];
+  return lines.join("\n");
+}
+
+/** 状态目录：与 settings/proxy 一致，可用 FUCKING_OPENCODE_STATE_DIR 覆盖。 */
+function 备份状态目录() {
+  const raw = process.env.FUCKING_OPENCODE_STATE_DIR;
+  if (raw !== undefined && String(raw).trim()) return String(raw).trim();
+  return require("path").join(process.env.USERPROFILE || process.env.HOME || ".", ".fucking-opencode");
+}
+
+const OPENAPI_JSON = JSON.stringify({
+  openapi: "3.1.0",
+  info: {
+    title: "Fucking Opencode",
+    version: VERSION,
+    description: "OpenCode 免费层网关：OpenAI Chat Completions、Anthropic Messages、OpenAI Responses。",
+  },
+  servers: [{ url: `http://127.0.0.1:${PORT}` }],
+  paths: {
+    "/health": {
+      get: {
+        summary: "健康状态与身份/网关诊断",
+        responses: { 200: { description: "OK", content: { "application/json": { schema: { type: "object" } } } } },
+      },
+    },
+    "/metrics": {
+      get: {
+        summary: "Prometheus 指标（设置 METRICS_TOKEN 后需 Bearer）",
+        responses: { 200: { description: "text/plain", content: { "text/plain": { schema: { type: "string" } } } } },
+      },
+    },
+    "/v1/models": {
+      get: {
+        summary: "当前可用的免费模型",
+        responses: { 200: { description: "模型列表", content: { "application/json": { schema: { type: "object" } } } } },
+      },
+    },
+    "/v1/models/{model}": {
+      get: {
+        summary: "单个模型",
+        parameters: [{ name: "model", in: "path", required: true, schema: { type: "string" } }],
+        responses: {
+          200: { description: "模型条目", content: { "application/json": { schema: { type: "object" } } } },
+          404: { description: "模型不存在" },
+        },
+      },
+    },
+    "/v1/chat/completions": {
+      post: {
+        summary: "OpenAI Chat Completions（支持 stream）",
+        requestBody: { required: true, content: { "application/json": { schema: { type: "object" } } } },
+        responses: {
+          200: { description: "完成体或 SSE 流" },
+          401: { description: "缺少或无效的 API key" },
+          429: { description: "上游额度或网关并发上限" },
+        },
+      },
+    },
+    "/v1/completions": {
+      post: {
+        summary: "OpenAI 旧版 Completions（翻译成 Chat 后回译）",
+        requestBody: { required: true, content: { "application/json": { schema: { type: "object" } } } },
+        responses: { 200: { description: "text_completion 或 SSE 流" } },
+      },
+    },
+    "/v1/embeddings": {
+      post: {
+        summary: "不提供：上游免费层无 embeddings",
+        responses: { 501: { description: "embeddings_not_supported" } },
+      },
+    },
+    "/v1/messages": {
+      post: {
+        summary: "Anthropic Messages（支持 stream）",
+        requestBody: { required: true, content: { "application/json": { schema: { type: "object" } } } },
+        responses: { 200: { description: "Anthropic 完成体或事件流" } },
+      },
+    },
+    "/v1/messages/count_tokens": {
+      post: {
+        summary: "Anthropic 词元近似计数（不触上游）",
+        requestBody: { required: true, content: { "application/json": { schema: { type: "object" } } } },
+        responses: { 200: { description: "{ input_tokens }" } },
+      },
+    },
+    "/v1/responses": {
+      post: {
+        summary: "OpenAI Responses（支持 stream）",
+        requestBody: { required: true, content: { "application/json": { schema: { type: "object" } } } },
+        responses: { 200: { description: "Responses 结果" } },
+      },
+    },
+  },
+});
+
+
 
 function timingSafeEqualStr(a, b) {
   const ab = Buffer.from(String(a));
@@ -838,7 +1167,103 @@ function adminRequestError(req) {
 }
 
 
-// ---- 面板会话 ----
+// ---- 面板会话（无状态签名 cookie） ----
+// 令牌 = "<过期毫秒>.<jti>.<HMAC-SHA256>"，密钥由持久 secret 文件与当前密码派生；
+// 因此重启后旧 cookie 依然有效，但改密码会立即使全部旧会话失效。
+let 面板会话密钥缓存 = null;
+
+function 面板会话密钥文件() {
+  return require("path").join(备份状态目录(), "panel-session-secret");
+}
+
+function 面板会话密钥() {
+  const file = 面板会话密钥文件();
+  const fs = require("fs");
+  if (!面板会话密钥缓存) {
+    let secret = "";
+    try {
+      secret = fs.readFileSync(file, "utf8").trim();
+    } catch {}
+    if (!/^[0-9a-f]{64}$/.test(secret)) {
+      secret = crypto.randomBytes(32).toString("hex");
+      try {
+        fs.mkdirSync(require("path").dirname(file), { recursive: true });
+        fs.writeFileSync(file, secret + "\n", { mode: 0o600 });
+        try {
+          fs.chmodSync(file, 0o600);
+        } catch {}
+      } catch {}
+    }
+    面板会话密钥缓存 = secret;
+  }
+  return crypto.createHash("sha256").update(`${面板会话密钥缓存}|${panelPassword() || ""}`).digest();
+}
+
+function 面板会话签名(expires, jti = "") {
+  return crypto.createHmac("sha256", 面板会话密钥()).update(`${expires}.${jti}`).digest("hex");
+}
+
+// 注销需要服务端吊销：无状态令牌本身不可撤销，因此把已注销的 jti 记到
+// <状态目录>/panel-revocations.json，重启后仍然生效，过期条目自动清理。
+let 面板撤销集 = null;
+
+function 面板撤销文件() {
+  return require("path").join(备份状态目录(), "panel-revocations.json");
+}
+
+function 面板撤销数据() {
+  if (面板撤销集) return 面板撤销集;
+  const map = new Map();
+  try {
+    const data = JSON.parse(require("fs").readFileSync(面板撤销文件(), "utf8"));
+    for (const [jti, exp] of Object.entries(data || {})) {
+      const n = Number(exp);
+      if (Number.isFinite(n) && n > Date.now()) map.set(jti, n);
+    }
+  } catch {}
+  面板撤销集 = map;
+  return map;
+}
+
+function 保存面板撤销() {
+  const map = 面板撤销数据();
+  const now = Date.now();
+  for (const [jti, exp] of map) if (!(exp > now)) map.delete(jti);
+  try {
+    const fs = require("fs");
+    const file = 面板撤销文件();
+    fs.mkdirSync(require("path").dirname(file), { recursive: true });
+    const tmp = `${file}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(Object.fromEntries(map)) + "\n", { mode: 0o600 });
+    fs.renameSync(tmp, file);
+    try {
+      fs.chmodSync(file, 0o600);
+    } catch {}
+  } catch {}
+}
+
+/** 解析并验证令牌；有效时返回 { expires, jti }，否则 null。 */
+function 解析面板令牌(token) {
+  if (!token) return null;
+  const parts = token.split(".");
+  if (parts.length !== 3) return null;
+  const [expiresRaw, jti, sig] = parts;
+  const expires = Number(expiresRaw);
+  if (!Number.isFinite(expires) || expires <= Date.now()) return null;
+  if (!/^[0-9a-f]{32}$/.test(jti)) return null;
+  if (!timingSafeEqualStr(面板会话签名(expires, jti), sig)) return null;
+  if (面板撤销数据().has(jti)) return null;
+  return { expires, jti };
+}
+
+/** 删除持久 secret：轮换后所有已签发 cookie 立即失效。 */
+function 重置面板会话密钥() {
+  面板会话密钥缓存 = null;
+  try {
+    require("fs").rmSync(面板会话密钥文件(), { force: true });
+  } catch {}
+}
+
 function panelCookie(req) {
   const raw = String(req.headers?.cookie || "");
   for (const part of raw.split(";")) {
@@ -850,28 +1275,24 @@ function panelCookie(req) {
 }
 function panelAuthorized(req) {
   if (!panelPassword()) return true;
-  const token = panelCookie(req);
-  if (!token) return false;
-  const expires = panelSessions.get(token);
-  if (!expires || expires < Date.now()) {
-    panelSessions.delete(token);
-    return false;
-  }
-  return true;
+  return 解析面板令牌(panelCookie(req)) !== null;
 }
 function panelSetCookie(res) {
-  const token = crypto.randomBytes(32).toString("hex");
-  const now = Date.now();
-  for (const [key, expires] of panelSessions) if (expires < now) panelSessions.delete(key);
-  panelSessions.set(token, now + PANEL_SESSION_TTL_MS);
+  const expires = Date.now() + PANEL_SESSION_TTL_MS;
+  const jti = crypto.randomBytes(16).toString("hex");
+  const token = `${expires}.${jti}.${面板会话签名(expires, jti)}`;
   res.setHeader(
     "Set-Cookie",
     `${PANEL_SESSION_COOKIE}=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${Math.floor(PANEL_SESSION_TTL_MS / 1000)}`
   );
 }
 function panelClearCookie(req, res) {
-  const token = panelCookie(req);
-  if (token) panelSessions.delete(token);
+  // 吊销当前令牌（其他设备/浏览器不受影响）；改密码会轮换 secret 吊销全部。
+  const parsed = 解析面板令牌(panelCookie(req));
+  if (parsed) {
+    面板撤销数据().set(parsed.jti, parsed.expires);
+    保存面板撤销();
+  }
   res.setHeader("Set-Cookie", `${PANEL_SESSION_COOKIE}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0`);
 }
 function panelUnauthorized(res) {
@@ -2239,6 +2660,7 @@ async function 处理WARPFarmAPI(req, res) {
         basePort: payload.basePort,
         stack: payload.stack,
         sourceIpv6: payload.sourceIpv6,
+        watchdog: payload.watchdog,
       });
       if (!saved.ok) return send(400, saved);
       return send(200, { ...saved, status: warpFarm.状态() });
@@ -2521,8 +2943,8 @@ async function 处理请求主体(req, res) {
         const result = panelSettings.addApiKey(payload.addApiKey);
         if (!result.ok) error = result.error;
       } else if (payload.updateApiKey && typeof payload.updateApiKey === "object") {
-        const { id, label, enabled } = payload.updateApiKey;
-        const result = panelSettings.updateApiKey(String(id || ""), { label, enabled });
+        const { id, label, enabled, rpm, daily, models } = payload.updateApiKey;
+        const result = panelSettings.updateApiKey(String(id || ""), { label, enabled, rpm, daily, models });
         if (!result.ok) error = result.error;
       } else if (typeof payload.deleteApiKey === "string") {
         const result = panelSettings.deleteApiKey(payload.deleteApiKey);
@@ -2548,12 +2970,79 @@ async function 处理请求主体(req, res) {
         return res.end(JSON.stringify({ error }));
       }
       if (passwordChanged) {
-        // 旧密码的会话立即失效；当前操作者保持登录。
-        panelSessions.clear();
+        // 旧密码派生的会话立即失效；轮换 secret 后给当前操作者签发新 cookie。
+        重置面板会话密钥();
         panelSetCookie(res);
       }
       res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
       return res.end(JSON.stringify({ ok: true, ...panelSettings.describe(), defaultModel: 默认模型值() || "", projectMode: 项目重置模式 }));
+    }
+    res.writeHead(405, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+    return res.end(JSON.stringify({ error: "Method not allowed." }));
+  }
+
+  // 状态备份：导出/恢复网关的 JSON 状态文件（不含 usage.jsonl）。
+  // 需要面板会话：内容包含代理凭据与下游 key，等同管理员权限。
+  if (pathname === "/api/backup") {
+    const denied = adminRequestError(req);
+    if (denied) {
+      res.writeHead(403, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+      return res.end(JSON.stringify({ error: denied }));
+    }
+    if (!panelAuthorized(req)) return panelUnauthorized(res);
+    const fs = require("fs");
+    const path = require("path");
+    const dir = 备份状态目录();
+    const 允许文件 = ["config.json", "settings.json", "proxy.json", "warp-farm.json", "model-health.json"];
+    const type = String(req.headers?.["content-type"] || "").split(";")[0].trim().toLowerCase();
+    if (req.method === "GET") {
+      const files = {};
+      for (const name of 允许文件) {
+        try {
+          files[name] = JSON.parse(fs.readFileSync(path.join(dir, name), "utf8"));
+        } catch {}
+      }
+      res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+      return res.end(JSON.stringify({ version: VERSION, exportedAt: Date.now(), files }));
+    }
+    if (req.method === "POST") {
+      if (type !== "application/json") {
+        res.writeHead(415, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+        return res.end(JSON.stringify({ error: "Content-Type harus application/json." }));
+      }
+      let payload = {};
+      try {
+        payload = JSON.parse(await readRequestBody(req, 1024 * 1024));
+      } catch (err) {
+        res.writeHead(err.statusCode === 413 ? 413 : 400, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+        return res.end(JSON.stringify({ error: `请求体无效：${err.message}` }));
+      }
+      const files = payload && typeof payload.files === "object" && payload.files ? payload.files : {};
+      const 已写 = [];
+      const 拒绝 = [];
+      for (const name of Object.keys(files)) {
+        if (!允许文件.includes(name)) {
+          拒绝.push(name);
+          continue;
+        }
+        const value = files[name];
+        if (!value || typeof value !== "object" || Array.isArray(value)) {
+          拒绝.push(name);
+          continue;
+        }
+        fs.mkdirSync(dir, { recursive: true });
+        const file = path.join(dir, name);
+        const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
+        fs.writeFileSync(tmp, JSON.stringify(value, null, 2) + "\n", { mode: 0o600 });
+        fs.renameSync(tmp, file);
+        try {
+          fs.chmodSync(file, 0o600);
+        } catch {}
+        已写.push(name);
+      }
+      记录事件(`状态已恢复（${已写.join(", ") || "无"}）`, "warn");
+      res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+      return res.end(JSON.stringify({ ok: true, restored: 已写, rejected: 拒绝 }));
     }
     res.writeHead(405, { "Content-Type": "application/json", "Cache-Control": "no-store" });
     return res.end(JSON.stringify({ error: "Method not allowed." }));
@@ -2730,6 +3219,45 @@ async function 处理请求主体(req, res) {
     );
   }
 
+  // Prometheus 指标：默认无鉴权（面板应只绑定回环）；设置 METRICS_TOKEN
+  // 后要求 `Authorization: Bearer <token>`，方便反向代理后暴露。
+  if (req.method === "GET" && pathname === "/metrics") {
+    const token = String(process.env.METRICS_TOKEN || "").trim();
+    if (token) {
+      const raw = String(req.headers?.authorization || "");
+      const given = raw.startsWith("Bearer ") ? raw.slice(7).trim() : "";
+      if (!timingSafeEqualStr(token, given)) {
+        res.writeHead(401, { "Content-Type": "text/plain; charset=utf-8", "WWW-Authenticate": "Bearer" });
+        return res.end("Unauthorized\n");
+      }
+    }
+    res.writeHead(200, { "Content-Type": "text/plain; version=0.0.4; charset=utf-8", "Cache-Control": "no-store" });
+    return res.end(渲染指标());
+  }
+
+  // OpenAPI 3.1：客户端生成器与调试器用的最小描述。
+  if (req.method === "GET" && pathname === "/openapi.json") {
+    res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
+    return res.end(OPENAPI_JSON);
+  }
+
+  // 单个模型详情：/v1/models/{id}。
+  if (req.method === "GET" && /^\/(v1\/)?models\/[^/]+$/.test(pathname)) {
+    const id = decodeURIComponent(pathname.replace(/^\/(v1\/)?models\//, ""));
+    if (在线模型表.length === 0) await discoverModels().catch(() => {});
+    let 清单 = { data: [] };
+    try {
+      清单 = JSON.parse(缓存模型负载);
+    } catch {}
+    const 条目 = (清单.data || []).find((m) => m && m.id === id);
+    if (!条目) {
+      res.writeHead(404, { "Content-Type": "application/json" });
+      return res.end(JSON.stringify({ error: { message: `模型 '${id}' 不存在。`, type: "invalid_request_error", code: "model_not_found" } }));
+    }
+    res.writeHead(200, { "Content-Type": "application/json" });
+    return res.end(JSON.stringify({ ...条目, object: "model" }));
+  }
+
   // 模型清单（小时级 TTL 过期时触发异步重发现）
   if (req.method === "GET" && (pathname === "/v1/models" || pathname === "/models")) {
     if (在线模型表.length === 0) {
@@ -2752,9 +3280,17 @@ async function 处理请求主体(req, res) {
   if (req.method === "POST" && (pathname === "/v1/chat/completions" || pathname === "/chat/completions")) {
     const 密钥拒绝 = 检查API密钥(req);
     if (密钥拒绝) {
-      res.writeHead(401, { "Content-Type": "application/json" });
-      return res.end(JSON.stringify(密钥拒绝));
+      const headers = { "Content-Type": "application/json" };
+      if (密钥拒绝.__retryAfter) headers["Retry-After"] = String(密钥拒绝.__retryAfter);
+      res.writeHead(密钥拒绝.__status || 401, headers);
+      return res.end(JSON.stringify({ error: 密钥拒绝.error }));
     }
+    const 并发槽 = await 申请并发槽();
+    if (!并发槽) {
+      res.writeHead(429, { "Content-Type": "application/json", "Retry-After": "1" });
+      return res.end(JSON.stringify({ error: { message: "网关繁忙：在途请求已满，请稍后重试。", type: "rate_limit_error", code: "gateway_busy" } }));
+    }
+    挂接并发释放(res, 并发槽);
     (async () => {
       let bodyText;
       try {
@@ -2821,6 +3357,13 @@ async function 处理请求主体(req, res) {
             },
           })
         );
+      }
+
+      // 下游 key 的模型白名单（条目未配置时放行）。
+      const 模型许可 = 检查模型许可(req, targetModel);
+      if (模型许可) {
+        res.writeHead(403, { "Content-Type": "application/json" });
+        return res.end(JSON.stringify({ error: { ...模型许可, param: "model" } }));
       }
 
       // 模型组：别名 → 有序候选。跳过目录明确判为非免费/退役的候选；
@@ -3914,25 +4457,63 @@ async function 处理请求主体(req, res) {
   if (req.method === "POST" && (pathname === "/v1/messages" || pathname === "/messages")) {
     const 密钥拒绝 = 检查API密钥(req);
     if (密钥拒绝) {
-      res.writeHead(401, { "Content-Type": "application/json" });
+      const headers = { "Content-Type": "application/json" };
+      if (密钥拒绝.__retryAfter) headers["Retry-After"] = String(密钥拒绝.__retryAfter);
+      res.writeHead(密钥拒绝.__status || 401, headers);
       return res.end(JSON.stringify({ type: "error", error: 密钥拒绝.error }));
     }
+    const 并发槽 = await 申请并发槽();
+    if (!并发槽) {
+      res.writeHead(429, { "Content-Type": "application/json", "Retry-After": "1" });
+      return res.end(JSON.stringify({ type: "error", error: { type: "rate_limit_error", message: "网关繁忙：在途请求已满，请稍后重试。" } }));
+    }
+    挂接并发释放(res, 并发槽);
     return 处理Anthropic消息(req, res);
   }
   if (req.method === "POST" && pathname === "/v1/messages/count_tokens") {
     const 密钥拒绝 = 检查API密钥(req);
     if (密钥拒绝) {
-      res.writeHead(401, { "Content-Type": "application/json" });
+      const headers = { "Content-Type": "application/json" };
+      if (密钥拒绝.__retryAfter) headers["Retry-After"] = String(密钥拒绝.__retryAfter);
+      res.writeHead(密钥拒绝.__status || 401, headers);
       return res.end(JSON.stringify({ type: "error", error: 密钥拒绝.error }));
     }
     return 处理Anthropic计数(req, res);
   }
+  if (req.method === "POST" && (pathname === "/v1/completions" || pathname === "/completions")) {
+    const 密钥拒绝 = 检查API密钥(req);
+    if (密钥拒绝) {
+      const headers = { "Content-Type": "application/json" };
+      if (密钥拒绝.__retryAfter) headers["Retry-After"] = String(密钥拒绝.__retryAfter);
+      res.writeHead(密钥拒绝.__status || 401, headers);
+      return res.end(JSON.stringify({ error: 密钥拒绝.error }));
+    }
+    const 并发槽 = await 申请并发槽();
+    if (!并发槽) {
+      res.writeHead(429, { "Content-Type": "application/json", "Retry-After": "1" });
+      return res.end(JSON.stringify({ error: { message: "网关繁忙：在途请求已满，请稍后重试。", type: "rate_limit_error", code: "gateway_busy" } }));
+    }
+    挂接并发释放(res, 并发槽);
+    return 处理旧式完成(req, res);
+  }
+  if (req.method === "POST" && (pathname === "/v1/embeddings" || pathname === "/embeddings")) {
+    res.writeHead(501, { "Content-Type": "application/json" });
+    return res.end(JSON.stringify({ error: { message: "上游免费层不提供 embeddings；请改用 /v1/chat/completions 或 /v1/completions。", type: "invalid_request_error", code: "embeddings_not_supported" } }));
+  }
   if (req.method === "POST" && (pathname === "/v1/responses" || pathname === "/responses")) {
     const 密钥拒绝 = 检查API密钥(req);
     if (密钥拒绝) {
-      res.writeHead(401, { "Content-Type": "application/json" });
+      const headers = { "Content-Type": "application/json" };
+      if (密钥拒绝.__retryAfter) headers["Retry-After"] = String(密钥拒绝.__retryAfter);
+      res.writeHead(密钥拒绝.__status || 401, headers);
       return res.end(JSON.stringify({ error: 密钥拒绝.error }));
     }
+    const 并发槽 = await 申请并发槽();
+    if (!并发槽) {
+      res.writeHead(429, { "Content-Type": "application/json", "Retry-After": "1" });
+      return res.end(JSON.stringify({ error: { message: "网关繁忙：在途请求已满，请稍后重试。", type: "rate_limit_error", code: "gateway_busy" } }));
+    }
+    挂接并发释放(res, 并发槽);
     return 处理Responses请求(req, res);
   }
 
@@ -4049,6 +4630,8 @@ function 桥内自调用(oaiBody, reqId) {
           "Content-Length": Buffer.byteLength(payload),
           // 会话亲和：同一逻辑对话沿用同一会话头。
           "X-OpenCode-Session": reqId,
+          // 内部跳转凭据：跳过鉴权、额度计数与并发闸门。
+          "X-Internal-Hop": 内部令牌,
         },
       },
       (res) => {
@@ -4069,6 +4652,107 @@ function 桥内自调用(oaiBody, reqId) {
     req.setTimeout(上游超时毫秒() + 5000, () => req.destroy(new Error("上游请求超时")));
     req.end(payload);
   });
+}
+
+/** POST /v1/completions —— OpenAI 旧版 Completions：翻译成 Chat 后回译。 */
+async function 处理旧式完成(req, res) {
+  let body;
+  try {
+    body = JSON.parse(await readRequestBody(req));
+    if (!body || typeof body !== "object") throw new Error("invalid");
+  } catch {
+    res.writeHead(400, { "Content-Type": "application/json" });
+    return res.end(JSON.stringify({ error: { message: "无效的 JSON 请求体", type: "invalid_request_error" } }));
+  }
+  if (!body.model) {
+    res.writeHead(400, { "Content-Type": "application/json" });
+    return res.end(JSON.stringify({ error: { message: "缺少必填参数：model", type: "invalid_request_error" } }));
+  }
+  const 原始 = Array.isArray(body.prompt) ? body.prompt : [body.prompt == null ? "" : body.prompt];
+  if (原始.length === 0 || 原始.length > 8 || !原始.every((p) => typeof p === "string")) {
+    res.writeHead(400, { "Content-Type": "application/json" });
+    return res.end(JSON.stringify({ error: { message: "prompt 必须是字符串或 1–8 个字符串的数组", type: "invalid_request_error" } }));
+  }
+  const 统计 = 用量统计 ? { t0: Date.now(), protocol: "completions", stream: Boolean(body.stream), request_id: 用量统计.新请求标识(), ...用量标签(req) } : null;
+  if (统计) res.setHeader("X-Request-Id", 统计.request_id);
+  const 落盘 = (status, extra = {}) => {
+    if (!统计) return;
+    用量统计.记录请求({ ...统计, model: body.model, status, ms: Date.now() - 统计.t0, ...extra });
+  };
+
+  const 模型许可 = 检查模型许可(req, body.model);
+  if (模型许可) {
+    落盘(403);
+    res.writeHead(403, { "Content-Type": "application/json" });
+    return res.end(JSON.stringify({ error: { ...模型许可, param: "model" } }));
+  }
+
+  const 参数 = {};
+  for (const key of ["max_tokens", "temperature", "top_p", "stop", "presence_penalty", "frequency_penalty", "seed"]) {
+    if (body[key] !== undefined) 参数[key] = body[key];
+  }
+
+  try {
+    const 结果 = await Promise.all(
+      原始.map((prompt, index) =>
+        桥内自调用(
+          { model: body.model, messages: [{ role: "user", content: prompt }], ...参数, stream: false },
+          统计 ? `${统计.request_id}-${index}` : `completions-${index}`
+        )
+      )
+    );
+    const 失败 = 结果.find((r) => r.status !== 200);
+    if (失败) {
+      let errMsg = "上游错误";
+      try {
+        errMsg = JSON.parse(失败.text)?.error?.message || 失败.text.slice(0, 200);
+      } catch {}
+      落盘(失败.status, { error: errMsg, egress: 失败.egress || undefined });
+      res.writeHead(失败.status, { "Content-Type": "application/json" });
+      return res.end(JSON.stringify({ error: { message: errMsg, type: "api_error" } }));
+    }
+
+    let 用量 = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
+    const choices = 结果.map((r, index) => {
+      let 完成 = null;
+      try {
+        完成 = JSON.parse(r.text);
+      } catch {}
+      const choice = 完成?.choices?.[0];
+      if (完成?.usage && index === 0) 用量 = 完成.usage;
+      const text = choice?.message?.content;
+      return {
+        text: typeof text === "string" ? text : "",
+        index,
+        logprobs: null,
+        finish_reason: choice?.finish_reason || "stop",
+      };
+    });
+    const id = `cmpl-${统计?.request_id || Date.now().toString(36)}`;
+    const created = Math.floor(Date.now() / 1000);
+    const 结果体 = { id, object: "text_completion", created, model: body.model, choices, usage: 用量 };
+
+    if (body.stream) {
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream; charset=utf-8",
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+      });
+      for (const choice of choices) {
+        res.write(`data: ${JSON.stringify({ id, object: "text_completion", created, model: body.model, choices: [choice] })}\n\n`);
+      }
+      res.write("data: [DONE]\n\n");
+      落盘(200, { input_tokens: 用量.prompt_tokens, output_tokens: 用量.completion_tokens });
+      return res.end();
+    }
+    落盘(200, { input_tokens: 用量.prompt_tokens, output_tokens: 用量.completion_tokens });
+    res.writeHead(200, { "Content-Type": "application/json" });
+    return res.end(JSON.stringify(结果体));
+  } catch (err) {
+    落盘(502, { error: err.message });
+    res.writeHead(502, { "Content-Type": "application/json" });
+    return res.end(JSON.stringify({ error: { message: err.message, type: "api_error" } }));
+  }
 }
 
 /** POST /v1/messages —— Anthropic Messages 协议。 */
@@ -4099,6 +4783,12 @@ async function 处理Anthropic消息(req, res) {
     落盘(400);
     res.writeHead(400, { "Content-Type": "application/json" });
     return res.end(JSON.stringify({ error: { type: "invalid_request_error", message: "缺少必填参数：model" } }));
+  }
+  const 模型许可 = 检查模型许可(req, oai.model);
+  if (模型许可) {
+    落盘(403);
+    res.writeHead(403, { "Content-Type": "application/json" });
+    return res.end(JSON.stringify({ type: "error", error: { type: "invalid_request_error", message: 模型许可.message } }));
   }
   if (!Array.isArray(oai.messages) || oai.messages.length === 0) {
     落盘(400);
@@ -4208,6 +4898,12 @@ async function 处理Responses请求(req, res) {
     落盘(400);
     res.writeHead(400, { "Content-Type": "application/json" });
     return res.end(JSON.stringify({ error: { message: "缺少必填参数：model", type: "invalid_request_error" } }));
+  }
+  const 模型许可 = 检查模型许可(req, oai.model);
+  if (模型许可) {
+    落盘(403);
+    res.writeHead(403, { "Content-Type": "application/json" });
+    return res.end(JSON.stringify({ error: { type: "invalid_request_error", message: 模型许可.message } }));
   }
 
   try {
@@ -4341,7 +5037,20 @@ function 管理端口处理器(req, res) {
   处理请求(req, res);
 }
 
-const server = http.createServer(主端口处理器);
+/** 可选 TLS：同时设置 PANEL_TLS_CERT 与 PANEL_TLS_KEY 时改用 https。 */
+function 创建HTTP服务器(处理器) {
+  const certFile = String(process.env.PANEL_TLS_CERT || "").trim();
+  const keyFile = String(process.env.PANEL_TLS_KEY || "").trim();
+  if (!certFile || !keyFile) return http.createServer(处理器);
+  const fs = require("fs");
+  const https = require("https");
+  return https.createServer(
+    { cert: fs.readFileSync(certFile), key: fs.readFileSync(keyFile) },
+    处理器
+  );
+}
+
+const server = 创建HTTP服务器(主端口处理器);
 let adminServer = null;
 
 // 只在直接执行（`node server.js`）时自动启动，单元测试可以
@@ -4389,7 +5098,7 @@ if (require.main === module) {
     }
   });
   if (分离管理端口) {
-    adminServer = http.createServer(管理端口处理器);
+    adminServer = 创建HTTP服务器(管理端口处理器);
     adminServer.on("error", (err) => {
       console.error(`[fucking-opencode] 管理端口 ${ADMIN_PORT} 启动失败：${err.message}`);
       process.exit(1);
@@ -4435,6 +5144,7 @@ if (require.main === module) {
 
 module.exports = {
   VERSION,
+  __panelSession: { sign: 面板会话签名, reset: 重置面板会话密钥, verify: panelAuthorized, clear: panelClearCookie },
   // e2e 测试起真实端口用：与内部 server 同一个处理器。
   __getHandler: () => 处理请求,
   // 为照着旧冻结常量写的调用点与测试保留。这些是解析后 profile 的

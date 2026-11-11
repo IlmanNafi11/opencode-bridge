@@ -725,6 +725,18 @@ Object.assign(I18N.patch.id, {
   "读取可选的 Cloudflare WARP 状态。": "Baca status Cloudflare WARP opsional.",
   "连接或断开 WARP（需 WARP_MANAGE=1）。": "Sambungkan atau putuskan WARP (perlu WARP_MANAGE=1).",
   "开启": "Aktif", "关闭": "Nonaktif",
+  "限额": "Batas", "限额已更新。": "Batas diperbarui.",
+  "每分钟请求上限（0 = 不限）": "Batas permintaan per menit (0 = tanpa batas)",
+  "24 小时请求上限（0 = 不限）": "Batas permintaan 24 jam (0 = tanpa batas)",
+  "允许的模型 ID（逗号分隔；留空 = 不限）": "ID model yang diizinkan (pisahkan koma; kosong = semua)",
+  "看门狗": "Watchdog",
+  "崩溃自动重启并清理死 lane": "Mulai ulang otomatis saat crash & bersihkan lane mati",
+  "可观测与备份": "Observabilitas & cadangan", "运维": "Operasional",
+  "下载状态备份": "Unduh cadangan state", "恢复备份": "Pulihkan cadangan",
+  "备份包含 settings.json、proxy.json、warp-farm.json、model-health.json 与 config.json；不含用量日志。": "Cadangan mencakup settings.json, proxy.json, warp-farm.json, model-health.json, dan config.json; tanpa log pemakaian.",
+  "备份已下载。": "Cadangan diunduh.",
+  "已恢复 ": "Dipulihkan ",
+  " 个文件，刷新页面后生效。": " file; segarkan halaman.",
 });
 
 Object.assign(I18N.patch.en, {
@@ -799,6 +811,18 @@ Object.assign(I18N.patch.en, {
   "读取可选的 Cloudflare WARP 状态。": "Read optional Cloudflare WARP status.",
   "连接或断开 WARP（需 WARP_MANAGE=1）。": "Connect or disconnect WARP (requires WARP_MANAGE=1).",
   "开启": "On", "关闭": "Off",
+  "限额": "Limits", "限额已更新。": "Limits updated.",
+  "每分钟请求上限（0 = 不限）": "Requests per minute cap (0 = unlimited)",
+  "24 小时请求上限（0 = 不限）": "24-hour request cap (0 = unlimited)",
+  "允许的模型 ID（逗号分隔；留空 = 不限）": "Allowed model IDs (comma separated; empty = all)",
+  "看门狗": "Watchdog",
+  "崩溃自动重启并清理死 lane": "Auto-restart on crash & clear dead lanes",
+  "可观测与备份": "Observability & backup", "运维": "Ops",
+  "下载状态备份": "Download state backup", "恢复备份": "Restore backup",
+  "备份包含 settings.json、proxy.json、warp-farm.json、model-health.json 与 config.json；不含用量日志。": "Backup covers settings.json, proxy.json, warp-farm.json, model-health.json and config.json; usage logs excluded.",
+  "备份已下载。": "Backup downloaded.",
+  "已恢复 ": "Restored ",
+  " 个文件，刷新页面后生效。": " file(s); refresh the page.",
 });
 
 let panelLang = "id";
@@ -847,6 +871,8 @@ function translatePattern(text) {
   if (text === "已开启（/v1/* 需 Bearer）") return id ? "Aktif (Bearer untuk /v1/*)" : "Enabled (Bearer required for /v1/*)";
   if (text === "未开启（任意非空 key）") return id ? "Nonaktif (key apa pun tidak kosong)" : "Disabled (any non-empty key)";
   if ((m = text.match(/^(\\d+) 毫秒$/))) return id ? m[1] + " md" : m[1] + " ms";
+  if ((m = text.match(/^已恢复 (\\d+) 个文件，刷新页面后生效。$/)))
+    return id ? m[1] + " file dipulihkan; segarkan halaman." : m[1] + " file(s) restored; refresh the page.";
   if ((m = text.match(/^(\\d+) 个$/))) return id ? m[1] + " model" : m[1] + " models";
   if ((m = text.match(/^冷却 (\\d+) 毫秒$/))) return id ? "Cooldown " + m[1] + " md" : "Cooldown " + m[1] + " ms";
   if ((m = text.match(/^读取失败：(.*)$/))) return (id ? "Gagal membaca: " : "Failed to read: ") + m[1];
@@ -2797,6 +2823,16 @@ function renderKeyRows(keys) {
     const preview = document.createElement("div");
     preview.className = "key-preview";
     preview.textContent = entry.preview;
+    const limitBits = [];
+    if (entry.rpm) limitBits.push(entry.rpm + " rpm");
+    if (entry.daily) limitBits.push(entry.daily + "/24h");
+    if (Array.isArray(entry.models) && entry.models.length) limitBits.push(entry.models.join(", "));
+    if (limitBits.length) {
+      const tag = document.createElement("span");
+      tag.className = "key-tag";
+      tag.textContent = limitBits.join(" · ");
+      preview.append(" ", tag);
+    }
     if (entry.source === "env") {
       const tag = document.createElement("span");
       tag.className = "key-tag";
@@ -2814,6 +2850,26 @@ function renderKeyRows(keys) {
         const label = prompt("新的标签", entry.label);
         if (label === null) return;
         const saved = await savePanelSettings({ updateApiKey: { id: entry.id, label } }, "标签已更新。");
+        if (saved) renderCredentials(saved);
+      });
+      const limits = document.createElement("button");
+      limits.type = "button";
+      limits.textContent = "限额";
+      limits.addEventListener("click", async () => {
+        const rpmRaw = prompt(tr("每分钟请求上限（0 = 不限）"), String(entry.rpm || 0));
+        if (rpmRaw === null) return;
+        const dailyRaw = prompt(tr("24 小时请求上限（0 = 不限）"), String(entry.daily || 0));
+        if (dailyRaw === null) return;
+        const modelsRaw = prompt(
+          tr("允许的模型 ID（逗号分隔；留空 = 不限）"),
+          Array.isArray(entry.models) ? entry.models.join(",") : "",
+        );
+        if (modelsRaw === null) return;
+        const models = modelsRaw.split(",").map((s) => s.trim()).filter(Boolean);
+        const saved = await savePanelSettings(
+          { updateApiKey: { id: entry.id, rpm: Number(rpmRaw) || 0, daily: Number(dailyRaw) || 0, models } },
+          "限额已更新。",
+        );
         if (saved) renderCredentials(saved);
       });
       const toggle = document.createElement("button");
@@ -2835,7 +2891,7 @@ function renderKeyRows(keys) {
         const saved = await savePanelSettings({ deleteApiKey: entry.id }, "key 已删除。");
         if (saved) renderCredentials(saved);
       });
-      actions.append(rename, toggle, del);
+      actions.append(rename, limits, toggle, del);
     }
     row.append(main, actions);
     list.append(row);
@@ -2929,6 +2985,54 @@ if (credClearKey) {
   });
 }
 
+const backupDownload = $("backup-download");
+if (backupDownload) {
+  backupDownload.addEventListener("click", async () => {
+    backupDownload.disabled = true;
+    try {
+      const res = await fetch("/api/backup");
+      const body = await readJson(res);
+      if (!res.ok) throw new Error(body.error || "HTTP " + res.status);
+      const blob = new Blob([JSON.stringify(body, null, 2)], { type: "application/json" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "fucking-opencode-backup-" + new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-") + ".json";
+      a.click();
+      URL.revokeObjectURL(a.href);
+      showReport($("backup-report"), [line("备份已下载。", "ok")]);
+    } catch (err) {
+      showReport($("backup-report"), [line(err.message, "bad")]);
+    } finally {
+      backupDownload.disabled = false;
+    }
+  });
+}
+
+const backupFile = $("backup-file");
+if (backupFile) {
+  backupFile.addEventListener("change", async () => {
+    const file = backupFile.files && backupFile.files[0];
+    if (!file) return;
+    try {
+      const payload = JSON.parse(await file.text());
+      const res = await fetch("/api/backup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const body = await readJson(res);
+      if (!res.ok) throw new Error(body.error || "HTTP " + res.status);
+      showReport($("backup-report"), [
+        line("已恢复 " + (Array.isArray(body.restored) ? body.restored.length : 0) + " 个文件，刷新页面后生效。", "ok"),
+      ]);
+    } catch (err) {
+      showReport($("backup-report"), [line(err.message, "bad")]);
+    } finally {
+      backupFile.value = "";
+    }
+  });
+}
+
 const credSavePass = $("cred-save-pass");
 if (credSavePass) {
   credSavePass.addEventListener("click", async () => {
@@ -2997,6 +3101,7 @@ function renderFarmSettings(settings) {
   if ($("farm-base-port")) $("farm-base-port").value = cfg.basePort != null ? String(cfg.basePort) : "";
   if ($("farm-stack")) $("farm-stack").value = cfg.stack || "ipv6";
   if ($("farm-source")) $("farm-source").value = cfg.sourceIpv6 || "";
+  if ($("farm-watchdog")) $("farm-watchdog").value = cfg.watchdog === false ? "false" : "true";
 }
 
 function renderFarmLanes(state) {
@@ -3110,6 +3215,7 @@ $("farm-save").addEventListener("click", async () => {
       basePort: Number($("farm-base-port").value),
       stack: $("farm-stack").value,
       sourceIpv6: $("farm-source").value.trim(),
+      watchdog: $("farm-watchdog") ? $("farm-watchdog").value !== "false" : true,
     });
     if (body.settings) renderFarmSettings(body.settings);
     showReport($("farm-settings-report"), [line("参数已保存；重启后生效。", "ok")]);
@@ -3670,6 +3776,13 @@ function renderPanel(description, { version = "", port = "", authRequired = fals
               <label for="farm-source">IPv6 源地址（可选）</label>
               <input id="farm-source" type="text" autocomplete="off" spellcheck="false" placeholder="2a09:...">
             </div>
+            <div class="field">
+              <label for="farm-watchdog">看门狗</label>
+              <select id="farm-watchdog">
+                <option value="true">崩溃自动重启并清理死 lane</option>
+                <option value="false">关闭</option>
+              </select>
+            </div>
           </div>
           <div class="actions">
             <button type="button" class="primary" id="farm-save">保存参数</button>
@@ -4007,6 +4120,18 @@ function renderPanel(description, { version = "", port = "", authRequired = fals
               <button type="button" id="copy-integration-curl">复制示例</button>
             </div>
             <p class="cred-note" id="integration-note">任何 OpenAI 兼容客户端把 Base URL 指向这里，并在 Authorization 里带上 API key。</p>
+          </div>
+          <div class="card settings-wide">
+            <div class="card-head"><h2>可观测与备份</h2><span class="card-meta">运维</span></div>
+            <div class="integration-actions">
+              <a class="btn-link" href="/metrics" target="_blank" rel="noopener">指标 /metrics</a>
+              <a class="btn-link" href="/openapi.json" target="_blank" rel="noopener">OpenAPI</a>
+              <button type="button" id="backup-download">下载状态备份</button>
+              <label class="btn-link" for="backup-file">恢复备份</label>
+              <input id="backup-file" type="file" accept="application/json" hidden>
+            </div>
+            <p class="cred-note">备份包含 settings.json、proxy.json、warp-farm.json、model-health.json 与 config.json；不含用量日志。</p>
+            <div class="report" id="backup-report" role="status" aria-live="polite" hidden></div>
           </div>
           <div class="card">
             <div class="card-head"><h2>运行</h2></div>

@@ -42,15 +42,22 @@ function 用量文件路径() {
 
 /** 单条记录上限。超出即丢（不可能发生：字段都截断过）。 */
 const 记录上限字节 = 64 * 1024;
-/** 文件大小上限：超过则在下次启动时截断到最新一半。 */
-const 文件上限字节 = 5 * 1024 * 1024;
+/** 默认文件上限（5 MB），可用 FUCKING_OPENCODE_USAGE_MAX_BYTES 覆盖。 */
+const 默认文件上限字节 = 5 * 1024 * 1024;
+const 最小文件上限字节 = 64 * 1024;
+const 最大文件上限字节 = 1024 * 1024 * 1024;
+
+function 文件上限字节() {
+  const raw = Number(process.env.FUCKING_OPENCODE_USAGE_MAX_BYTES);
+  if (Number.isFinite(raw) && raw >= 最小文件上限字节) return Math.min(Math.floor(raw), 最大文件上限字节);
+  return 默认文件上限字节;
+}
 
 let 已截断 = false;
+let 写入计数 = 0;
 
-/** 启动时截断超大历史。 */
-function 启动截断() {
-  if (已截断) return;
-  已截断 = true;
+/** 把文件截断到最新一半；未超过上限时什么都不做。 */
+function 截断到一半() {
   try {
     const file = 用量文件路径();
     let st;
@@ -59,12 +66,21 @@ function 启动截断() {
     } catch {
       return;
     }
-    if (st.size <= 文件上限字节) return;
+    if (st.size <= 文件上限字节()) return;
     const raw = fs.readFileSync(file, "utf8");
     const lines = raw.split("\n").filter(Boolean);
     const keep = lines.slice(Math.floor(lines.length / 2));
-    fs.writeFileSync(file, keep.length ? keep.join("\n") + "\n" : "", "utf8");
+    const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
+    fs.writeFileSync(tmp, keep.length ? keep.join("\n") + "\n" : "", "utf8");
+    fs.renameSync(tmp, file);
   } catch {}
+}
+
+/** 启动时截断超大历史。 */
+function 启动截断() {
+  if (已截断) return;
+  已截断 = true;
+  截断到一半();
 }
 
 /** 记一次请求。全部字段先收窄再写盘；任何错误静默。 */
@@ -97,6 +113,9 @@ function 记录请求(条目 = {}) {
     if (Buffer.byteLength(line) > 记录上限字节) return;
     fs.mkdirSync(状态目录(), { recursive: true });
     fs.appendFileSync(用量文件路径(), line + "\n", "utf8");
+    // 运行期间也要轮转：每 200 次写入检查一次大小，避免长期不重启导致无界增长。
+    写入计数 = (写入计数 + 1) % 200;
+    if (写入计数 === 0) 截断到一半();
   } catch {}
 }
 

@@ -1,5 +1,53 @@
 # Changelog
 
+## [0.1.4] — 2026-11-11
+
+Operational hardening: per-key limits, observability, backup/restore, TLS, and
+a farm watchdog.
+
+- Per-key limits: `settings.json` entries now carry `rpm` (sliding 60 s),
+  `daily` (rolling 24 h), and `models` (allowlist). The panel's key rows gain a
+  **限额** editor; `/v1/chat/completions`, `/v1/messages`, and `/v1/responses`
+  return `429` with `Retry-After` (`key_rate_limited` / `key_quota_exceeded`) or
+  `403 model_not_allowed`. Counters are in memory and reset on restart. The
+  Anthropic/Responses bridges tag self-calls with a per-process internal token
+  (`X-Internal-Hop`) so a translated request is neither double-counted nor
+  deadlocked.
+- Concurrency gate: `MAX_INFLIGHT` (default 64) caps in-flight inference; excess
+  requests queue for `MAX_INFLIGHT_WAIT_MS` (default 30 s) and then fail with
+  `429 gateway_busy`. `POST /v1/messages/count_tokens` stays outside the gate.
+- Observability: `GET /metrics` (Prometheus text; optional `METRICS_TOKEN`),
+  `GET /openapi.json` (3.1), and `GET /v1/models/{model}`.
+- Legacy endpoints: `POST /v1/completions` translates `prompt` (string or 1–8
+  strings) into chat requests and maps the result back to `text_completion`
+  (stream and non-stream); `POST /v1/embeddings` answers
+  `501 embeddings_not_supported` because the free tier has no embeddings.
+- Panel sessions: signed stateless cookies (`<state>/panel-session-secret`,
+  `0600`, key derived from the secret and the current password) survive gateway
+  restarts within the 12 h TTL. `/api/logout` revokes only that token via
+  `<state>/panel-revocations.json` (also persisted, pruned on write); changing
+  the password rotates the secret and revokes every session at once.
+- Backup: `GET/POST /api/backup` exports or restores the JSON state files
+  (`settings.json`, `proxy.json`, `warp-farm.json`, `model-health.json`,
+  `config.json`) behind the existing panel session; writes are atomic and
+  `0600`. The panel's Settings view links the backup and metrics surfaces.
+- TLS: set `PANEL_TLS_CERT` and `PANEL_TLS_KEY` to serve both listeners over
+  HTTPS; no self-signed generation.
+- Usage ledger: rotation threshold is now `FUCKING_OPENCODE_USAGE_MAX_BYTES`
+  (64 KiB–1 GiB, default 5 MiB), halved in place instead of deleted, checked at
+  start and every 200 writes.
+- WARP farm watchdog: every 5 s the gateway checks the sidecar; dead lanes are
+  removed from the proxy pool (so traffic falls back to direct or the single
+  proxy instead of a dead port) and the sidecar restarts when **看门狗** is on
+  (`<state>/warp-farm.json`, `watchdog`, default `true`; toggle in the panel).
+  Manual stop disables auto-restart.
+- Release tooling: `scripts/package-release.sh` cross-builds the Go sidecar for
+  linux/darwin/windows × amd64/arm64, embeds the matching binary in each
+  archive (`warp-farm/warp-farm[.exe]`), and emits standalone
+  `warp-farm_<os>_<arch>` assets with checksums; `install.sh` builds the
+  sidecar from a local checkout when Go is present; `.github/workflows/release.yml`
+  packages and uploads everything on a `v*` tag.
+
 ## [0.1.3] — 2026-11-11
 
 - `warp-farm/` — Go sidecar (no Docker, no TUN): N WARP registrations, one

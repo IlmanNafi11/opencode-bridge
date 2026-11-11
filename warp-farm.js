@@ -81,7 +81,7 @@ function 设置文件() {
 
 /** 面板保存的参数；文件缺失时回落到环境变量/内置默认值。 */
 function 读设置() {
-  const 值 = { size: 默认大小, basePort: 默认端口基数, stack: 默认栈, sourceIpv6: "" };
+  const 值 = { size: 默认大小, basePort: 默认端口基数, stack: 默认栈, sourceIpv6: "", watchdog: true };
   try {
     const data = JSON.parse(fs.readFileSync(设置文件(), "utf8"));
     if (data && typeof data === "object") {
@@ -89,6 +89,7 @@ function 读设置() {
       if (Number.isInteger(data.basePort) && data.basePort >= 1024 && data.basePort <= 65000) 值.basePort = data.basePort;
       if (["ipv6", "ipv4", "dual"].includes(data.stack)) 值.stack = data.stack;
       if (typeof data.sourceIpv6 === "string") 值.sourceIpv6 = data.sourceIpv6.trim();
+      if (typeof data.watchdog === "boolean") 值.watchdog = data.watchdog;
     }
   } catch {}
   return 值;
@@ -111,6 +112,7 @@ function 保存设置(patch = {}) {
     当前.stack = patch.stack;
   }
   if (patch.sourceIpv6 != null) 当前.sourceIpv6 = String(patch.sourceIpv6).trim();
+  if (patch.watchdog != null) 当前.watchdog = patch.watchdog !== false;
   const 文件 = 设置文件();
   const 临时 = `${文件}.tmp.${process.pid}`;
   try {
@@ -163,7 +165,90 @@ function 应用到池(status = 状态缓存) {
   return { ok: true, entries: entries.length + existing.length };
 }
 
+/** 从代理池移除 farm lane，保留其它条目；全部移除时池会退回直连/单代理。 */
+function 从池移除() {
+  try {
+    const proxy = require("./proxy");
+    const all = proxy.getPool();
+    const keep = all.filter((entry) => !String(entry.id || "").startsWith("warp-f"));
+    if (keep.length === all.length) return { ok: true, removed: 0 };
+    proxy.setPool({ entries: keep });
+    return { ok: true, removed: all.length - keep.length };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+}
+
+let 看门狗 = null;
+let 看门狗忙 = false;
+let 上次重启 = 0;
+let 用户停止 = false;
+
+/** 看门狗：sidecar 消失或控制端口无响应时清空死 lane，并按设置自动重启。 */
+async function 看门狗节拍() {
+  if (看门狗忙) return;
+  看门狗忙 = true;
+  try {
+    const proxy = require("./proxy");
+    const farmInPool = () =>
+      proxy.getPool().some((entry) => String(entry.id || "").startsWith("warp-f"));
+    const settings = 读设置();
+    if (!子进程) {
+      if ((状态缓存.lanes || []).length > 0) {
+        状态缓存 = { ...状态缓存, lanes: [] };
+        从池移除();
+      } else if (farmInPool()) {
+        从池移除();
+      }
+      if (settings.watchdog === false || 用户停止 || 停止中) return;
+      if (Date.now() - 上次重启 < 15000) return;
+      if (!找二进制()) return;
+      上次重启 = Date.now();
+      记录行("[watchdog] warp-farm berhenti; memulai ulang\n", "stderr");
+      await 启动({ applyToPool: true }).catch(() => {});
+      return;
+    }
+    let status = null;
+    try {
+      status = await 取状态(状态缓存.controlPort, 1500);
+    } catch (err) {
+      记录行(`[watchdog] control port tidak merespons: ${err.message}\n`, "stderr");
+      try {
+        子进程.kill();
+      } catch {}
+      return;
+    }
+    状态缓存 = {
+      ...状态缓存,
+      running: true,
+      lanes: status.lanes || [],
+      stack: status.stack || 状态缓存.stack,
+      error: null,
+    };
+    const ready = (状态缓存.lanes || []).filter((lane) => lane.ready);
+    if (ready.length > 0 && !farmInPool()) 应用到池(状态缓存);
+    else if (ready.length === 0 && farmInPool()) 从池移除();
+  } finally {
+    看门狗忙 = false;
+  }
+}
+
+function 启动看门狗() {
+  if (看门狗) return;
+  看门狗 = setInterval(() => {
+    看门狗节拍().catch(() => {});
+  }, 5000);
+  看门狗.unref?.();
+}
+
+function 停止看门狗() {
+  if (!看门狗) return;
+  clearInterval(看门狗);
+  看门狗 = null;
+}
+
 async function 启动(options = {}) {
+  用户停止 = false;
   if (子进程 && !子进程.killed) {
     return { ok: true, already: true, ...状态缓存 };
   }
@@ -212,6 +297,7 @@ async function 启动(options = {}) {
     windowsHide: true,
   });
   子进程 = child;
+  启动看门狗();
   child.stdout.on("data", (chunk) => 记录行(chunk, "stdout"));
   child.stderr.on("data", (chunk) => 记录行(chunk, "stderr"));
   child.on("exit", (code, signal) => {
@@ -221,8 +307,11 @@ async function 启动(options = {}) {
         ...状态缓存,
         running: false,
         pid: null,
+        lanes: [],
         error: `warp-farm keluar (code=${code} signal=${signal})${tail ? `: ${tail}` : ""}`,
       };
+      // 死掉的 lane 不能留在池里：挑选出口从不回退，会把所有请求送进死端口。
+      从池移除();
     }
     子进程 = null;
   });
@@ -323,8 +412,10 @@ async function 轮换(port = null) {
 }
 
 async function 停止() {
+  用户停止 = true;
   if (!子进程) {
-    状态缓存 = { ...状态缓存, running: false, pid: null };
+    状态缓存 = { ...状态缓存, running: false, pid: null, lanes: [] };
+    从池移除();
     return { ok: true, already: true };
   }
   停止中 = true;
@@ -350,6 +441,7 @@ async function 停止() {
   停止中 = false;
   子进程 = null;
   状态缓存 = { ...状态缓存, running: false, pid: null, lanes: [] };
+  从池移除();
   return { ok: true };
 }
 
@@ -408,6 +500,9 @@ module.exports = {
   log: 日志,
   binaryPath: 找二进制,
   poolEntries: 合成池条目,
+  启动看门狗,
+  停止看门狗,
+  从池移除,
   controlUrl: () => 控制地址(状态缓存.controlPort),
   // 供 server.js 使用其内部命名的别名。
   启动,

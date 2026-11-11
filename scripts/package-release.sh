@@ -30,6 +30,32 @@ for f in "$ROOT"/warp-farm/*.go "$ROOT"/warp-farm/go.mod "$ROOT"/warp-farm/go.su
   [ -e "$f" ] && cp "$f" "$STAGE/warp-farm/"
 done
 
+# 交叉编译 sidecar：每个平台包只带自己那份二进制，另附独立资产。
+HAS_GO=0
+command -v go >/dev/null 2>&1 && HAS_GO=1
+SIDECAR_OUT="$OUT/.sidecar"
+mkdir -p "$SIDECAR_OUT"
+
+sidecar_build() {
+  local goos="$1" goarch="$2" ext=""
+  [ "$goos" = "windows" ] && ext=".exe"
+  local out="$SIDECAR_OUT/warp-farm_${goos}_${goarch}${ext}"
+  [ -f "$out" ] && return 0
+  ( cd "$ROOT/warp-farm" && CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" \
+      go build -trimpath -buildvcs=false -o "$out" . )
+}
+
+sidecar_stage() {
+  local goos="$1" goarch="$2" ext=""
+  [ "$goos" = "windows" ] && ext=".exe"
+  rm -f "$STAGE/warp-farm/warp-farm" "$STAGE/warp-farm/warp-farm.exe"
+  if [ "$HAS_GO" = "1" ]; then
+    sidecar_build "$goos" "$goarch"
+    cp "$SIDECAR_OUT/warp-farm_${goos}_${goarch}${ext}" "$STAGE/warp-farm/warp-farm${ext}"
+    chmod +x "$STAGE/warp-farm/warp-farm${ext}" 2>/dev/null || true
+  fi
+}
+
 cat > "$STAGE/fucking-opencode" <<'LAUNCH'
 #!/usr/bin/env bash
 # 启动网关：优先使用已安装的 bun，否则提示安装。
@@ -54,6 +80,7 @@ LAUNCH
 build_unix() {
   local arch="$1"
   local os="$2"
+  sidecar_stage "$os" "$arch"
   local pkg="$OUT/${NAME}_v${VERSION}_${os}_${arch}.tar.gz"
   ( cd "$OUT" && tar -czf "$(basename "$pkg")" "$NAME-$VERSION" )
   ( cd "$OUT" && sha256sum "$(basename "$pkg")" > "$(basename "$pkg").sha256" )
@@ -62,6 +89,7 @@ build_unix() {
 
 build_windows() {
   local arch="$1"
+  sidecar_stage windows "$arch"
   local zip="$OUT/${NAME}_v${VERSION}_windows_$arch.zip"
   local winStage winOut
   winStage="$(cygpath -w "$STAGE" 2>/dev/null || echo "$STAGE")"
@@ -77,5 +105,20 @@ build_unix amd64 darwin
 build_unix arm64 darwin
 build_windows amd64
 build_windows arm64
+
+if [ "$HAS_GO" = "1" ]; then
+  for os in linux darwin windows; do
+    for arch in amd64 arm64; do
+      ext=""
+      [ "$os" = "windows" ] && ext=".exe"
+      sidecar_build "$os" "$arch"
+      cp "$SIDECAR_OUT/warp-farm_${os}_${arch}${ext}" "$OUT/warp-farm_${os}_${arch}${ext}"
+      ( cd "$OUT" && sha256sum "warp-farm_${os}_${arch}${ext}" > "warp-farm_${os}_${arch}${ext}.sha256" )
+    done
+  done
+else
+  echo "Go not found: archives ship warp-farm sources without prebuilt binaries"
+fi
+rm -rf "$SIDECAR_OUT"
 
 ls -1 "$OUT"

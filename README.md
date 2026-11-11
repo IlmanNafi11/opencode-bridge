@@ -66,31 +66,36 @@ step) with a matching `.sha256` file:
 
 | Platform | Archive |
 | --- | --- |
-| Linux x86_64 | `fucking-opencode_v0.1.3_linux_amd64.tar.gz` |
-| Linux arm64 | `fucking-opencode_v0.1.3_linux_arm64.tar.gz` |
-| macOS Intel | `fucking-opencode_v0.1.3_darwin_amd64.tar.gz` |
-| macOS Apple silicon | `fucking-opencode_v0.1.3_darwin_arm64.tar.gz` |
-| Windows x86_64 | `fucking-opencode_v0.1.3_windows_amd64.zip` |
-| Windows arm64 | `fucking-opencode_v0.1.3_windows_arm64.zip` |
+| Linux x86_64 | `fucking-opencode_v0.1.4_linux_amd64.tar.gz` |
+| Linux arm64 | `fucking-opencode_v0.1.4_linux_arm64.tar.gz` |
+| macOS Intel | `fucking-opencode_v0.1.4_darwin_amd64.tar.gz` |
+| macOS Apple silicon | `fucking-opencode_v0.1.4_darwin_arm64.tar.gz` |
+| Windows x86_64 | `fucking-opencode_v0.1.4_windows_amd64.zip` |
+| Windows arm64 | `fucking-opencode_v0.1.4_windows_arm64.zip` |
 
 ```bash
-tar -xzf fucking-opencode_v0.1.3_linux_amd64.tar.gz
-cd fucking-opencode-0.1.3
+tar -xzf fucking-opencode_v0.1.4_linux_amd64.tar.gz
+cd fucking-opencode-0.1.4
 ./fucking-opencode          # or: bun server.js
 ```
 
 On Windows extract the zip and run `fucking-opencode.cmd` (or `bun server.js`).
 Bun 1.4+ must be on `PATH`; the launchers fail with an install hint otherwise.
 Verify a download first with `sha256sum -c <archive>.sha256` (Linux/macOS) or
-`Get-FileHash` (Windows).
+`Get-FileHash` (Windows). Each archive contains the matching `warp-farm`
+sidecar binary; standalone `warp-farm_<os>_<arch>` files are attached to every
+release too.
 
 ### Dashboard login
 
 `/` and every admin API are behind a password gate when a panel password is
-configured. The password is entered without a username. On this install both
-the panel password and the downstream API key are **`your-secret`**; change either
-under **设置 → 访问凭据**. When no panel password is stored and
-`PANEL_PASSWORD` is unset, the loopback panel stays open.
+configured. The password is entered without a username. Panel sessions are
+signed cookies valid for 12 hours and survive gateway restarts; changing the
+password revokes every session, while `/api/logout` revokes only the current
+token (the revocation list is persisted too). On this install both the panel
+password and the downstream API key are
+**`your-secret`**; change either under **设置 → 访问凭据**. When no panel
+password is stored and `PANEL_PASSWORD` is unset, the loopback panel stays open.
 
 The API key gates inference routes (`/v1/chat/completions`, `/v1/messages`,
 `/v1/responses`). `/v1/models` stays open so clients can discover model IDs.
@@ -149,7 +154,10 @@ PORT=20140 bash install.sh      # install alongside an existing gateway
 ```
 
 From a checkout, `bash install.sh` installs the working tree, including
-uncommitted files. `SOURCE=remote bash install.sh` forces a download.
+uncommitted files. `SOURCE=remote bash install.sh` forces a download. With `go`
+on `PATH`, a checkout install also builds the `warp-farm` sidecar into
+`<BINDIR>/warp-farm/warp-farm`; without Go the gateway installs normally and
+only WARP farm stays unavailable.
 
 ### Docker
 
@@ -220,6 +228,11 @@ docker run -d --name fucking-opencode \
 | `AUTO_UPDATE` | `1` | Check for updates every six hours; skipped inside a git checkout |
 | `WARP_MANAGE` | `0` | `1` enables the optional `/api/warp` connect/disconnect controls for a host-installed `warp-cli` |
 | `ALLOW_NODE` | *(unset)* | Bypass the Bun guard for offline tests only |
+| `FUCKING_OPENCODE_USAGE_MAX_BYTES` | `5242880` | Usage ledger rotation threshold (64 KiB–1 GiB); rotated by halving in place |
+| `MAX_INFLIGHT` | `64` | Concurrent inference cap; `0` disables the gate |
+| `MAX_INFLIGHT_WAIT_MS` | `30000` | Queue wait before `429 gateway_busy`; `0` fails immediately |
+| `METRICS_TOKEN` | *(unset)* | Require `Authorization: Bearer` on `/metrics` |
+| `PANEL_TLS_CERT` / `PANEL_TLS_KEY` | *(unset)* | Serve panel, API, and inference over HTTPS on both listeners when both are set |
 
 Changing a credential or proxy in the panel applies immediately. Other
 environment changes require a restart.
@@ -312,9 +325,14 @@ no GPL code is linked into `server.js`.
 | Route | Dialect | Notes |
 | --- | --- | --- |
 | `POST /v1/chat/completions` | OpenAI Chat | Streaming folded to JSON for `stream: false` |
+| `POST /v1/completions` | OpenAI legacy | Translated to Chat and back to `text_completion`; `prompt` may be 1–8 strings |
+| `POST /v1/embeddings` | OpenAI | `501 embeddings_not_supported` (upstream has no embeddings) |
 | `POST /v1/messages` | Anthropic | Usage mapping includes cached tokens |
 | `POST /v1/responses` | OpenAI Responses | Full streamed lifecycle |
 | `GET /v1/models` | OpenAI | Active free models only; remains open |
+| `GET /v1/models/{model}` | OpenAI | Single model entry; `404 model_not_found` when retired/unknown |
+| `GET /metrics` | Prometheus | `text/plain; version=0.0.4`; optional `METRICS_TOKEN` bearer |
+| `GET /openapi.json` | OpenAPI 3.1 | Minimal spec for client generators |
 | `GET /health` | — | Identity, gate, egress, and runtime state |
 | `POST /api/login` | — | Panel login; throttled after 10 failures per IP in 10 minutes |
 | `POST /api/logout` | — | Clears the panel session |
@@ -329,6 +347,7 @@ no GPL code is linked into `server.js`.
 | `GET /api/stats` | — | Totals, model/provider/client/key breakdowns, 24-bucket series, P50/P95/P99, TTFT average |
 | `GET /api/history` | — | Request history with range filters |
 | `GET /api/events` | — | Gateway log ring tail from `?after=<sequence>` |
+| `GET/POST /api/backup` | — | Export or restore `settings.json`, `proxy.json`, `warp-farm.json`, `model-health.json`, `config.json` (panel session required) |
 
 ### Connect anything
 

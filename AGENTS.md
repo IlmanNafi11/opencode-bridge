@@ -36,7 +36,7 @@ curl -fsSL https://raw.githubusercontent.com/ShinRyu04/Fucking-Opencode/main/ins
 bash install.sh
 ```
 
-这样安装的是**工作树**，而不是 GitHub，因此未推送的提交也能安装并测试。`SOURCE=remote bash install.sh` 强制走下载路径；`SOURCE=local` 则拒绝回退到该路径。
+这样安装的是**工作树**，而不是 GitHub，因此未推送的提交也能安装并测试。`SOURCE=remote bash install.sh` 强制走下载路径；`SOURCE=local` 则拒绝回退到该路径。安装器现在也会复制 `warp-farm.js`；当 `go` 在 PATH 且来源是本地克隆时，它会 `go build` sidecar 二进制到 `<BINDIR>/warp-farm/warp-farm`（Go 是可选依赖，缺失时只跳过 WARP farm）。
 
 自定义端口或安装目录：
 
@@ -115,7 +115,11 @@ curl -s http://127.0.0.1:20134/v1/chat/completions \
 
 ### WARP farm（可选，无 Docker）
 
-`WARP_FARM=1` 时 `server.js` 启动 `warp-farm/warp-farm[.exe]`（Go，需先 `cd warp-farm && go build -o warp-farm.exe .`），把每个 lane 的 `socks5://127.0.0.1:40001..` 注册进现有代理池。`WARP_FARM_SIZE`（默认 8）、`WARP_FARM_STACK`（默认 `ipv6`，唯一 `/64` 出口；`ipv4` 是共享 NAT）、`WARP_FARM_SOURCE_IPV6`（可选外层前缀）。lane 遇 `429`/额度或传输失败时网关自动让 farm 换注册（同端口，60 秒去抖）。`GET /api/warp-farm` 查看；POST `start|stop|rotate|restart|applyPool|settings` 管理，`settings` 把 `size/basePort/stack/sourceIpv6` 持久化到 `<状态目录>/warp-farm.json`，启动参数缺省时优先用它（显式环境变量仍生效）。Go 目录是独立 GPL-3.0 程序，不链接进 `server.js`。
+`WARP_FARM=1` 时 `server.js` 启动 `warp-farm/warp-farm[.exe]`（Go，需先 `cd warp-farm && go build -o warp-farm.exe .`），把每个 lane 的 `socks5://127.0.0.1:40001..` 注册进现有代理池。`WARP_FARM_SIZE`（默认 8）、`WARP_FARM_STACK`（默认 `ipv6`，唯一 `/64` 出口；`ipv4` 是共享 NAT）、`WARP_FARM_SOURCE_IPV6`（可选外层前缀）。lane 遇 `429`/额度或传输失败时网关自动让 farm 换注册（同端口，60 秒去抖）。`GET /api/warp-farm` 查看；POST `start|stop|rotate|restart|applyPool|settings` 管理，`settings` 把 `size/basePort/stack/sourceIpv6/watchdog` 持久化到 `<状态目录>/warp-farm.json`，启动参数缺省时优先用它（显式环境变量仍生效）。Go 目录是独立 GPL-3.0 程序，不链接进 `server.js`。
+
+新增运维环境变量：`FUCKING_OPENCODE_USAGE_MAX_BYTES`（用量账本轮转阈值，64 KiB–1 GiB，默认 5 MiB，按折半就地轮转）、`MAX_INFLIGHT`（默认 64，`0` 关闭并发闸门）与 `MAX_INFLIGHT_WAIT_MS`（默认 30000，`0` 立即 429 `gateway_busy`）、`METRICS_TOKEN`（`/metrics` 的 Bearer 口令；不设则开放，面板应只绑回环）、`PANEL_TLS_CERT` + `PANEL_TLS_KEY`（同时设置时两个监听器都改 HTTPS）。每 key 的 `rpm`/`daily`/`models` 限额保存在 `settings.json`，面板「限额」按钮编辑；计数在内存中，重启归零。
+
+面板会话现在是**无状态签名 cookie**：`<状态目录>/panel-session-secret`（`0600`，首次登录生成）与当前密码派生 HMAC 密钥，令牌有效 12 小时并跨重启保留；`/api/logout` 只吊销当前令牌（记入同样持久化的 `panel-revocations.json`，写入时清理过期项），改密码会轮换 secret 使所有旧会话立即失效。
 
 模型组别名先走第一个候选；在未向客户端写出任何字节前遇到 `404`/`410`/`429`/`5xx` 就切下一个。失败模型记入 `<状态目录>/model-health.json` 冷却（`404` 5 分钟、`429` 1 分钟、`5xx` 30 秒），后续请求跳过直到冷却结束。可用 `FUCKING_OPENCODE_MODEL_GROUPS`（JSON）临时覆盖组定义，优先级高于文件。
 
@@ -232,7 +236,7 @@ Error: remote port forwarding failed for listen port 20136
 
 | 文件 | 职责 |
 |---|---|
-| `server.js` | HTTP 服务器（`/` 处的面板、`/v1/chat/completions`、`/v1/models`、`/health`、带 `adminRequestError` CSRF/Host 防护的 `/api/proxy`）、Bun 运行时守卫、对 `proxy.js`/`panel.js` 的容错加载以及 `repairMissingModules()`，使半安装的树也能启动并自愈、可配置的 DNS 结果顺序（`DNS_RESULT_ORDER`）、会话亲和性缓存、客户端工具别名（`read` -> `read_client`）、SSE 流规范化（`reasoning_content`、`usage`、`finish_reason`）、带 30 秒 IP 冷却重试抑制（`GATE_RETRY_COOLDOWN_MS`）的 403/426/404 响应式重试循环、终止性 IP 滥用分支（`X-OpenCode-Gate: ip-abuse`，不刷新/重试）、出口代理（推理、发现和自更新时使用 `proxy.netFetch`）以及可选的 `UPSTREAM_RELAY_URL` 中继（`x-relay-target` / `x-relay-path`），还有 6 小时自更新器（`checkAndApplyUpdate`），它会暂存传入的 `server.js` 所需的任何模块，即使正在运行的 `UPDATE_FILES` 列表早于该模块。 |
+|`server.js`|HTTP 服务器（`/` 处的面板、`/v1/chat/completions`、`/v1/models`、`/v1/models/{id}`、`/metrics`、`/openapi.json`、`/health`、带 `adminRequestError` CSRF/Host 防护的 `/api/proxy` 与 `/api/backup`）、Bun 运行时守卫、对 `proxy.js`/`panel.js` 的容错加载以及 `repairMissingModules()`，使半安装的树也能启动并自愈、可配置的 DNS 结果顺序（`DNS_RESULT_ORDER`）、会话亲和性缓存、客户端工具别名（`read` -> `read_client`）、SSE 流规范化（`reasoning_content`、`usage`、`finish_reason`）、带 30 秒 IP 冷却重试抑制（`GATE_RETRY_COOLDOWN_MS`）的 403/426/404 响应式重试循环、终止性 IP 滥用分支（`X-OpenCode-Gate: ip-abuse`，不刷新/重试）、出口代理（推理、发现和自更新时使用 `proxy.netFetch`）以及可选的 `UPSTREAM_RELAY_URL` 中继（`x-relay-target` / `x-relay-path`），还有 6 小时自更新器（`checkAndApplyUpdate`），它会暂存传入的 `server.js` 所需的任何模块，即使正在运行的 `UPDATE_FILES` 列表早于该模块。并发闸门（`MAX_INFLIGHT` / `MAX_INFLIGHT_WAIT_MS`）、每 key 的 `rpm`/`daily`/`models` 限额、`METRICS_TOKEN`、可选 `PANEL_TLS_CERT`/`PANEL_TLS_KEY` 也在这里。|
 | `identity.js` | 自适应 OpenCode CLI 同步：发布握手（`opencode.ai/update/api`）、GitHub 源码获取器（`identifier.ts`、`session-id.ts`、`app.ts`、`model-request.ts`、`tool/plugin/*.ts`、`codemode/tool.ts`）、Effect Schema AST 解析器（`extractToolFromSource`）、提供方目录解析器与磁盘缓存（`~/.fucking-opencode/cache/catalog.json`）、30 秒强制刷新冷却（`GATE_REFRESH_COOLDOWN_MS`）、终止性 `isIpAbuseRejection` 守卫，以及池化 CSPRNG 会话 ID 生成器（`createSessionId`）与项目 ID 生成器（`createProjectId`，逐请求换新以重置按项目记账的免费额度；`OPENCODE_PROJECT_MODE=derived` 恢复 CLI 忠实推导）。 |
 | `token-budget.js` | 加法式 token 预算计算（推理模型为 `max(requested, 1024) + 4096`，标准模型为 `max(requested, 512)`），由目录 `modelFacts` 驱动。 |
 | `proxy.js` | 出口：URL 校验（HTTP/HTTPS/SOCKS5，凭据需百分号编码）、在 `<state dir>/proxy.json`（权限 `0600`）中为单个代理和代理池持久化、带面板锁定的 `UPSTREAM_PROXY_URL`/`UPSTREAM_PROXY_POOL` 覆盖、按条目健康检查与指数冷却（`markFailure`/`markSuccess`/`pick`），持久化在 `<state dir>/pool-health.json`（权限 `0600`，以出口身份的截断 SHA-256 为键，因此绝不会重复代理凭据，通过重命名写入，拒绝立即生效 / 成功合并写入）、`withProxy`/`netFetch`（显式出口参数）供 `server.js` 和 `identity.js` 中的每次出站调用使用，以及 `testProxy`/`testPool`（上游探测 + `cdn-cgi/trace` 出口 IP）。 |
@@ -241,7 +245,7 @@ Error: remote port forwarding failed for listen port 20136
 | `config.js` | 读取 `<状态目录>/config.json`（或 `FUCKING_OPENCODE_CONFIG`），优先级 env > 文件 > 默认值，按 mtime 热加载，校验非法值并保留上一份有效配置。 |
 | `model-groups.js` | 模型组别名解析与候选排序，失败模型按 `404`/`429`/`5xx` 冷却并持久化到 `<状态目录>/model-health.json`。 |
 | `warp.js` | 可选的 Cloudflare WARP 控制：探测 `warp-cli`，解析 `status`，执行 `connect`/`disconnect`；仅 `WARP_MANAGE=1` 时动作生效。 |
-| `warp-farm.js` | Go sidecar 桥：找/运行 `warp-farm` 二进制，轮询 control HTTP，把 lane 注册进现有代理池，失败/额度耗尽时轮换 lane（每 lane 60 秒去抖）。`WARP_FARM=1` 开机自启；`GET|POST /api/warp-farm` 提供 status/start/stop/rotate/restart/applyPool/settings。 |
+| `warp-farm.js` | Go sidecar 桥：找/运行 `warp-farm` 二进制，轮询 control HTTP，把 lane 注册进现有代理池，失败/额度耗尽时轮换 lane（每 lane 60 秒去抖）。`WARP_FARM=1` 开机自启；`GET|POST /api/warp-farm` 提供 status/start/stop/rotate/restart/applyPool/settings。5 秒看门狗在进程消失或 control 端口无响应时从池中移除 `warp-f*` 条目（picker 不会回退，死 lane 会把全部请求送进死端口），并在 `warp-farm.json` 的 `watchdog`（默认 `true`）开启时自动重启；手动 stop 抑制自动重启。 |
 | `warp-farm/` | 独立 Go 模块（GPL-3.0-or-later，见 `NOTICE.md`）：N 个 WARP 注册 → 每注册一个 userspace WireGuard（UDP，无 TUN）→ 每个 exit 一个回环 SOCKS5 listener（`40001..`）+ 回环 control HTTP。不通过 Docker；与网关只经 SOCKS5/HTTP 通信。 |
 | `panel.js` | 在 `/` 提供的 HTML 面板：概览/健康/诊断/事件/日志/出口/代理池/WARP 农场/统计/历史/接入点/文档/测试台/设置 视图，同源表单读写 `/api/*`，对每个配置值转义，不暴露凭据。 |
 | `transport-fingerprint.js` | 针对本地 TCP 监听器捕获运行时的原始 TLS `ClientHello` 字节，并将加密套件和扩展顺序与 `transport-baseline.json` 比较。 |

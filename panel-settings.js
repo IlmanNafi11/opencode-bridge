@@ -42,6 +42,17 @@ function 新ID() {
   return crypto.randomBytes(6).toString("hex");
 }
 
+function 收窄限额(raw) {
+  const rpmRaw = Number(raw && raw.rpm);
+  const dailyRaw = Number(raw && raw.daily);
+  const rpm = Number.isFinite(rpmRaw) ? Math.min(Math.max(Math.floor(rpmRaw), 0), 600) : 0;
+  const daily = Number.isFinite(dailyRaw) ? Math.min(Math.max(Math.floor(dailyRaw), 0), 1000000) : 0;
+  const models = Array.isArray(raw && raw.models)
+    ? raw.models.map((entry) => 字符串(entry).slice(0, 120)).filter(Boolean).slice(0, 50)
+    : [];
+  return { rpm, daily, models };
+}
+
 /** 把任意存储值收窄成合法 key 条目；非法条目直接丢弃。 */
 function 收窄条目(raw, index) {
   if (!raw || typeof raw !== "object") return null;
@@ -50,7 +61,7 @@ function 收窄条目(raw, index) {
   const label = 字符串(raw.label).slice(0, MAX_LABEL_LENGTH) || `key-${index + 1}`;
   const createdAt = Number.isFinite(Number(raw.createdAt)) ? Number(raw.createdAt) : Date.now();
   const id = 字符串(raw.id).slice(0, 32) || 新ID();
-  return { id, label, key, enabled: raw.enabled !== false, createdAt };
+  return { id, label, key, enabled: raw.enabled !== false, createdAt, ...收窄限额(raw) };
 }
 
 function 读取() {
@@ -111,7 +122,16 @@ function 写入(patch) {
   }
   // 旧单 key 字段不再落盘：读取时迁移，写入时统一成列表。
   const json = {
-    apiKeys: next.apiKeys.map(({ id, label, key, enabled, createdAt }) => ({ id, label, key, enabled, createdAt })),
+    apiKeys: next.apiKeys.map(({ id, label, key, enabled, createdAt, rpm, daily, models }) => ({
+      id,
+      label,
+      key,
+      enabled,
+      createdAt,
+      ...(rpm ? { rpm } : {}),
+      ...(daily ? { daily } : {}),
+      ...(models && models.length ? { models } : {}),
+    })),
   };
   if (next.panelPassword) json.panelPassword = next.panelPassword;
   const dir = 状态目录();
@@ -179,7 +199,14 @@ function matchApiKey(token) {
   let matched = null;
   for (const entry of 启用密钥()) {
     if (时效比较(text, entry.key) && matched === null) {
-      matched = { id: entry.id, label: entry.label, source: entry.source };
+      matched = {
+        id: entry.id,
+        label: entry.label,
+        source: entry.source,
+        rpm: entry.rpm || 0,
+        daily: entry.daily || 0,
+        models: Array.isArray(entry.models) ? entry.models : [],
+      };
     }
   }
   return matched;
@@ -228,17 +255,20 @@ function 预览(key) {
 
 /** 面板展示用：绝不回传完整密钥。 */
 function listApiKeys() {
-  return 全部密钥().map(({ id, label, key, enabled, createdAt, source }) => ({
+  return 全部密钥().map(({ id, label, key, enabled, createdAt, source, rpm, daily, models }) => ({
     id,
     label,
     enabled,
     source,
     createdAt,
     preview: 预览(key),
+    rpm: rpm || 0,
+    daily: daily || 0,
+    models: Array.isArray(models) ? models : [],
   }));
 }
 
-function addApiKey({ label = "", key = "" } = {}) {
+function addApiKey({ label = "", key = "", rpm = 0, daily = 0, models = [] } = {}) {
   const labelError = 校验标签(label);
   if (labelError) return { ok: false, error: labelError };
   const keyError = 校验密钥("API key", key);
@@ -255,11 +285,12 @@ function addApiKey({ label = "", key = "" } = {}) {
     key: text,
     enabled: true,
     createdAt: Date.now(),
+    ...收窄限额({ rpm, daily, models }),
   };
   return { ok: true, data: 写入({ apiKeys: [...data.apiKeys, entry] }) };
 }
 
-function updateApiKey(id, { label, enabled } = {}) {
+function updateApiKey(id, { label, enabled, rpm, daily, models } = {}) {
   const data = 读取();
   const index = data.apiKeys.findIndex((entry) => entry.id === id);
   if (index === -1) {
@@ -274,6 +305,13 @@ function updateApiKey(id, { label, enabled } = {}) {
   const entry = { ...next[index] };
   if (label !== undefined) entry.label = 字符串(label) || entry.label;
   if (enabled !== undefined) entry.enabled = enabled !== false;
+  if (rpm !== undefined || daily !== undefined || models !== undefined) {
+    Object.assign(entry, 收窄限额({
+      rpm: rpm !== undefined ? rpm : entry.rpm,
+      daily: daily !== undefined ? daily : entry.daily,
+      models: models !== undefined ? models : entry.models,
+    }));
+  }
   next[index] = entry;
   return { ok: true, data: 写入({ apiKeys: next }) };
 }
