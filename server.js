@@ -198,6 +198,32 @@ const 分离管理端口 = ADMIN_PORT > 0 && ADMIN_PORT !== PORT;
 function 上游超时毫秒() {
   return runtimeConfig.取("upstreamTimeoutMs");
 }
+
+// 上游已回 200 头但迟迟不发首个 SSE 事件时，客户端会一直挂着。
+// 默认 15 秒后放弃并让出口进入冷却；0 = 关闭。
+function 首事件超时毫秒() {
+  const raw = process.env.FIRST_EVENT_TIMEOUT_MS;
+  if (raw === undefined || String(raw).trim() === "") return 15000;
+  const 数 = parseInt(String(raw).trim(), 10);
+  if (!Number.isFinite(数) || 数 < 0) return 15000;
+  return Math.min(数, 120000);
+}
+
+async function 读首个数据块(reader, 毫秒) {
+  let timer;
+  const 超时 = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      const err = new Error(`Upstream sent no first SSE event within ${毫秒}ms`);
+      err.code = "first_event_timeout";
+      reject(err);
+    }, 毫秒);
+  });
+  try {
+    return await Promise.race([reader.read(), 超时]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 function 请求体上限() {
   return runtimeConfig.取("maxBodyBytes");
 }
@@ -258,6 +284,14 @@ const CORS_ORIGIN = process.env.CORS_ORIGIN !== undefined ? process.env.CORS_ORI
 // 只在 /v1/chat/completions 生效；兼容路由本来就要求显式 model。
 function 默认模型值() {
   return runtimeConfig.取("defaultModel");
+}
+
+// 客户端没给 reasoning_effort 时，用网关级默认或按模型覆盖；
+// 显式请求永远优先。
+function 推理强度(targetModel) {
+  const 映射 = runtimeConfig.取("reasoningEffortByModel") || {};
+  const 指定 = 映射[targetModel] || runtimeConfig.取("reasoningEffort") || "";
+  return 指定 || undefined;
 }
 /** 接口密钥检查：返回 null（通过）或 401 响应体。 */
 function 检查API密钥(req) {
@@ -536,6 +570,89 @@ function 备份状态目录() {
   const raw = process.env.FUCKING_OPENCODE_STATE_DIR;
   if (raw !== undefined && String(raw).trim()) return String(raw).trim();
   return require("path").join(process.env.USERPROFILE || process.env.HOME || ".", ".fucking-opencode");
+}
+
+// 匿名单通道熔断：上游免费层按出口 IP 计额度。连续 N 次最终 429 / IP 封锁
+// 后，继续打只会延长惩罚。暂停期内直接快速拒绝，指数退避，成功后退避清零。
+// ANON_BACKOFF_THRESHOLD 默认 0（关闭，与 opencode2api 默认一致）。
+let 匿名退避缓存 = null;
+
+function 匿名退避配置() {
+  const 数 = (值, 默认) => {
+    const 解 = parseFloat(值);
+    return Number.isFinite(解) ? 解 : 默认;
+  };
+  return {
+    threshold: Math.max(0, Math.floor(数(process.env.ANON_BACKOFF_THRESHOLD, 0))),
+    base: Math.min(Math.max(数(process.env.ANON_BACKOFF_BASE_HOURS, 1), 0.1), 24),
+    max: Math.min(Math.max(数(process.env.ANON_BACKOFF_MAX_HOURS, 24), 0.1), 168),
+  };
+}
+
+function 匿名退避文件() {
+  return require("path").join(备份状态目录(), "anon-backoff.json");
+}
+
+function 读匿名退避() {
+  if (匿名退避缓存) return 匿名退避缓存;
+  let 状态 = { failures: 0, trips: 0, until: 0 };
+  try {
+    const 数据 = JSON.parse(require("fs").readFileSync(匿名退避文件(), "utf8"));
+    if (数据 && typeof 数据 === "object") {
+      状态.failures = Math.max(0, Number(数据.failures) || 0);
+      状态.trips = Math.max(0, Number(数据.trips) || 0);
+      状态.until = Math.max(0, Number(数据.until) || 0);
+    }
+  } catch {}
+  if (状态.until && 状态.until <= Date.now()) 状态 = { failures: 0, trips: 状态.trips, until: 0 };
+  匿名退避缓存 = 状态;
+  return 匿名退避缓存;
+}
+
+function 写匿名退避(状态) {
+  匿名退避缓存 = 状态;
+  const 文件 = 匿名退避文件();
+  const 临时 = `${文件}.tmp.${process.pid}`;
+  try {
+    require("fs").mkdirSync(require("path").dirname(文件), { recursive: true });
+    require("fs").writeFileSync(临时, JSON.stringify(状态), { mode: 0o600 });
+    require("fs").renameSync(临时, 文件);
+  } catch {
+    try {
+      require("fs").unlinkSync(临时);
+    } catch {}
+  }
+}
+
+function 匿名暂停剩余毫秒() {
+  const 状态 = 读匿名退避();
+  return 状态.until > Date.now() ? 状态.until - Date.now() : 0;
+}
+
+function 记录匿名失败(原因) {
+  const { threshold, base, max } = 匿名退避配置();
+  if (!threshold) return;
+  const 状态 = 读匿名退避();
+  if (状态.until > Date.now()) return;
+  状态.failures += 1;
+  if (状态.failures < threshold) {
+    写匿名退避(状态);
+    return;
+  }
+  状态.trips += 1;
+  状态.failures = 0;
+  const 小时 = Math.min(max, base * Math.pow(2, 状态.trips - 1));
+  状态.until = Date.now() + Math.round(小时 * 3600 * 1000);
+  写匿名退避(状态);
+  console.warn(
+    `[fucking-opencode] 匿名通道连续失败达到 ${threshold} 次（${原因}）；暂停 ${小时} 小时后重试。`
+  );
+}
+
+function 记录匿名成功() {
+  const 状态 = 读匿名退避();
+  if (!状态.failures && !状态.trips && !状态.until) return;
+  写匿名退避({ failures: 0, trips: 0, until: 0 });
 }
 
 const OPENAPI_JSON = JSON.stringify({
@@ -2076,6 +2193,10 @@ function buildUpstreamPayload(body, targetModel, useResponses, scope = null) {
   if (body.stop !== undefined) upstreamBody.stop = body.stop;
   if (body.response_format !== undefined) upstreamBody.response_format = body.response_format;
   if (body.reasoning_effort !== undefined) upstreamBody.reasoning_effort = body.reasoning_effort;
+  else {
+    const 强度 = 推理强度(targetModel);
+    if (强度) upstreamBody.reasoning_effort = 强度;
+  }
 
   // 上游 v2 对 tool_choice: "none" 回 403 FreeTierError。
   if (body.tool_choice && body.tool_choice !== "none") {
@@ -3508,6 +3629,26 @@ async function 处理请求主体(req, res) {
       }
       const egressUrl = () => egressState.egressUrl;
 
+      const 暂停毫秒 = 匿名暂停剩余毫秒();
+      if (暂停毫秒 > 0) {
+        const 秒 = Math.max(1, Math.ceil(暂停毫秒 / 1000));
+        落盘统计(429, { error: "anonymous_lane_paused" });
+        res.writeHead(429, {
+          "Content-Type": "application/json",
+          "Retry-After": String(秒),
+        });
+        return res.end(
+          JSON.stringify({
+            error: {
+              message: `Anonymous lane is paused for another ${秒}s after repeated upstream quota/abuse rejections.`,
+              type: "anonymous_lane_paused",
+              code: 429,
+              retry_after: 秒,
+            },
+          })
+        );
+      }
+
       let 当前候选 = 0;
       模型尝试: for (; 当前候选 < 候选列表.length; 当前候选++) {
         targetModel = 候选列表[当前候选];
@@ -3641,6 +3782,7 @@ async function 处理请求主体(req, res) {
           }
           if (upstreamRes.status === 429) {
             记录出口失败(egressState, { reason: "allowance 429", cooldownMs });
+            记录匿名失败("allowance 429");
           }
         }
 
@@ -3751,6 +3893,7 @@ async function 处理请求主体(req, res) {
             }
             if (upstreamRes.ok) break 错误处理;
             if (identity.isIpAbuseRejection(lastStatus, lastMsg)) {
+              记录匿名失败("ip-abuse");
               return 回应IP滥用(res, lastStatus, lastType, lastMsg, lastLogId, targetModel);
             }
             continue 错误处理;
@@ -4019,6 +4162,7 @@ async function 处理请求主体(req, res) {
         // 这个出口承载了上游接受的请求，失败史已过期：清掉，
         // 下一次挑选把它当健康。
         proxy.markSuccess(egressState.egressUrl);
+        记录匿名成功();
         模型组.记录成功(targetModel);
         const completionId = `chatcmpl-${crypto.randomBytes(12).toString("hex")}`;
         const created = Math.floor(Date.now() / 1000);
@@ -4189,7 +4333,7 @@ async function 处理请求主体(req, res) {
               } catch {}
             };
 
-            await 消费SSE行(reader, decoder, handleResponsesStreamLine);
+            await 消费SSE行(reader, decoder, handleResponsesStreamLine, 首事件超时毫秒());
             if (streamAbortedByError) {
               落盘统计(502, { error: "上游在流内失败" });
               if (!res.writableEnded) res.end();
@@ -4273,7 +4417,7 @@ async function 处理请求主体(req, res) {
               }
             };
 
-            await 消费SSE行(reader, decoder, handleChatStreamLine);
+            await 消费SSE行(reader, decoder, handleChatStreamLine, 首事件超时毫秒());
             if (!res.writableEnded) {
               if (!sseHeadersSent) writeSse("data: [DONE]\n\n");
               res.end();
@@ -4408,7 +4552,7 @@ async function 处理请求主体(req, res) {
           } catch {}
         };
 
-        await 消费SSE行(reader, decoder, handleNonStreamLine);
+        await 消费SSE行(reader, decoder, handleNonStreamLine, 首事件超时毫秒());
 
         if (streamError) {
           console.warn(`[fucking-opencode] 上游在流内失败：${streamError}`);
@@ -4459,6 +4603,26 @@ async function 处理请求主体(req, res) {
         }
         if (clientDisconnected || res.writableEnded) {
           return;
+        }
+        if (err && err.code === "first_event_timeout") {
+          记录出口失败(egressState, { reason: "first_event_timeout" });
+          console.warn(
+            `[fucking-opencode] 上游 ${proxy.displayHost(egressState.egressUrl) || "direct"} 首个事件超时（${首事件超时毫秒()}ms），出口已进入冷却。`
+          );
+          const 错误体 = {
+            message: `Upstream sent no first event within ${首事件超时毫秒()}ms; the egress was cooled and the request may be retried.`,
+            type: "first_event_timeout",
+            code: 504,
+          };
+          落盘统计(504, { error: "上游首个事件超时" });
+          if (!res.headersSent) {
+            res.writeHead(504, { "Content-Type": "application/json" });
+            return res.end(JSON.stringify({ error: 错误体 }));
+          }
+          try {
+            res.write(`data: ${JSON.stringify({ error: 错误体 })}\n\ndata: [DONE]\n\n`);
+          } catch {}
+          return res.end();
         }
         if (timedOut) {
           落盘统计(504, { error: "上游请求超时" });
@@ -5042,10 +5206,13 @@ function 处理统计API(req, res, pathname) {
   return res.end(JSON.stringify({ requests: rows.slice(-limit).reverse(), file: 用量统计.用量文件路径() }));
 }
 
-async function 消费SSE行(reader, decoder, onLine) {
+async function 消费SSE行(reader, decoder, onLine, 首事件毫秒 = 0) {
   let buffer = "";
+  let 首个块 = true;
   while (true) {
-    const { done, value } = await reader.read();
+    const { done, value } =
+      首个块 && 首事件毫秒 > 0 ? await 读首个数据块(reader, 首事件毫秒) : await reader.read();
+    首个块 = false;
     if (done) {
       buffer += decoder.decode();
       if (buffer.trim()) {
@@ -5225,6 +5392,9 @@ module.exports = {
   isResponsesModel,
   markProtocolSupport,
   __resetProtocolLanes,
+  __resetAnonymousBackoff() {
+    匿名退避缓存 = null;
+  },
   extractContent: 提取内容,
   transformToResponsesInput: 变换为Responses输入,
   transformChatMessages: 变换对话消息,

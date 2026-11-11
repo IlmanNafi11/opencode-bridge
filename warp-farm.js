@@ -147,22 +147,73 @@ function 合成池条目(status) {
   }));
 }
 
-/** 把 lane 注册进代理池，不丢弃非 farm 的条目。 */
+/** 把 lane 注册进代理池，不丢弃非 farm 的条目。
+ *
+ * 免费层按出口 IP 计额度：同一 IPv6 /64 重新注册后仍是同一份配额。
+ * 一条 lane 因额度进入冷却时，记住它的 /64（IPv4 为 /32），在 30 分钟内
+ * 不把落在同一块的 lane 放回池里 —— 即使 sidecar 重启后拿到了相同前缀。
+ */
+const 出口块冷却 = new Map();
+const 块冷却毫秒 = 30 * 60 * 1000;
+let 上次池签名 = "";
+
+function 出口块(ip) {
+  const 文本 = String(ip || "").trim();
+  if (!文本) return "";
+  if (文本.includes(":")) return 文本.split(":").slice(0, 4).join(":");
+  return 文本;
+}
+
 function 应用到池(status = 状态缓存) {
   const proxy = require("./proxy");
-  const entries = (status.lanes || []).map((lane) => ({
+  const now = Date.now();
+  const lanes = status.lanes || [];
+
+  const 健康 = new Map(
+    (proxy.describe().pool?.entries || []).map((entry) => [entry.id, entry])
+  );
+  for (const lane of lanes) {
+    const entry = 健康.get(`warp-f${lane.index}`);
+    if (entry && entry.cooldownUntil > now) {
+      const 块 = 出口块(lane.egress);
+      if (块) 出口块冷却.set(块, Math.max(出口块冷却.get(块) || 0, entry.cooldownUntil));
+    }
+  }
+  for (const [块, until] of 出口块冷却) {
+    if (until <= now) 出口块冷却.delete(块);
+  }
+
+  const usable = lanes.filter((lane) => {
+    const 块 = 出口块(lane.egress);
+    if (!块) return true;
+    return (出口块冷却.get(块) || 0) <= now;
+  });
+  if (usable.length === 0) {
+    const proxy = require("./proxy");
+    if (proxy.getPool().some((entry) => String(entry.id || "").startsWith("warp-f"))) {
+      从池移除();
+      上次池签名 = "";
+    }
+    return { ok: false, reason: "semua lane dalam cooldown blok" };
+  }
+
+  const entries = usable.map((lane) => ({
     id: `warp-f${lane.index}`,
     label: `warp-f${lane.index}`,
     url: lane.url,
     enabled: true,
     weight: 1,
   }));
-  if (entries.length === 0) return { ok: false, reason: "tidak ada lane" };
   const existing = proxy
     .getPool()
     .filter((entry) => !String(entry.id || "").startsWith("warp-f"));
+  const signature = entries.map((e) => `${e.id}|${e.url}`).join(",");
+  if (signature === 上次池签名) {
+    return { ok: true, unchanged: true, entries: entries.length + existing.length };
+  }
   proxy.setPool({ entries: [...existing, ...entries], strategy: "round-robin" });
-  return { ok: true, entries: entries.length + existing.length };
+  上次池签名 = signature;
+  return { ok: true, entries: entries.length + existing.length, coolingBlocks: 出口块冷却.size };
 }
 
 /** 从代理池移除 farm lane，保留其它条目；全部移除时池会退回直连/单代理。 */
@@ -226,8 +277,8 @@ async function 看门狗节拍() {
       error: null,
     };
     const ready = (状态缓存.lanes || []).filter((lane) => lane.ready);
-    if (ready.length > 0 && !farmInPool()) 应用到池(状态缓存);
-    else if (ready.length === 0 && farmInPool()) 从池移除();
+    if (ready.length > 0) 应用到池(状态缓存);
+    else if (farmInPool()) 从池移除();
   } finally {
     看门狗忙 = false;
   }

@@ -126,6 +126,21 @@ function 解析池条目(raw, index) {
 
   const label = String(source.label == null ? "" : source.label).trim().slice(0, 64);
 
+  // `#pool` / `pool+` 标记：该地址背后是轮换代理，每条连接都是新出口 IP。
+  // 这类条目永不冷却 —— 冷却一个会换 IP 的端点只会误伤可用出口。
+  let rotating = source.rotating === true;
+  let 原始地址 = source.url;
+  if (typeof 原始地址 === "string") {
+    const 文本 = 原始地址.trim();
+    if (/^pool\+/i.test(文本)) {
+      rotating = true;
+      原始地址 = 文本.slice(5);
+    } else if (/#pool$/i.test(文本)) {
+      rotating = true;
+      原始地址 = 文本.replace(/#pool$/i, "");
+    }
+  }
+
   if (source.direct === true) {
     const id = String(source.id == null ? "" : source.id).trim().slice(0, 64) || label || "direct";
     const weight = Number(source.weight);
@@ -142,7 +157,7 @@ function 解析池条目(raw, index) {
     };
   }
 
-  const parsed = 解析代理地址(source.url);
+  const parsed = 解析代理地址(原始地址);
   if (!parsed.ok) return { ok: false, error: `第 ${index + 1} 条：${parsed.error}` };
   if (!parsed.url) return { ok: false, error: `第 ${index + 1} 条：URL 为空。` };
 
@@ -156,6 +171,7 @@ function 解析池条目(raw, index) {
       label: label || id,
       url: parsed.url,
       direct: false,
+      rotating,
       enabled: source.enabled === undefined ? true : Boolean(source.enabled),
       weight: Number.isFinite(weight) && weight > 0 ? Math.min(weight, 100) : 1,
     },
@@ -494,10 +510,14 @@ function 挑选出口({ exclude = null, now = Date.now() } = {}) {
   // `null` 表示"无偏好"，不能与直连条目的空 URL 混淆 —— 两者会映射到同一个
   // 健康表键。
   const excluded = exclude === null || exclude === undefined ? null : 出口键(exclude);
-  let candidates = excluded === null ? entries.slice() : entries.filter((e) => 出口键(e.url) !== excluded);
+  // 轮换代理每次连接都换 IP，失败不该排除整个端点。
+  let candidates =
+    excluded === null
+      ? entries.slice()
+      : entries.filter((e) => e.rotating || 出口键(e.url) !== excluded);
   if (candidates.length === 0) candidates = entries.slice();
 
-  const healthy = candidates.filter((e) => !冷却中(e.url, now));
+  const healthy = candidates.filter((e) => e.rotating || !冷却中(e.url, now));
   let chosen;
   let cooling = false;
 
@@ -558,6 +578,10 @@ function 记录失败(egressUrl, { reason = "throttled", now = Date.now(), coold
   // 空字符串是 `direct` 条目，它是真实出口；只有缺参（null/undefined）才表
   // 示"没东西可记"。
   if (egressUrl === null || egressUrl === undefined) return null;
+  const 条目标记 = 代理池.entries.find((e) => 出口键(e.url) === 出口键(egressUrl));
+  if (条目标记 && 条目标记.rotating) {
+    return { failures: 0, cooldownUntil: 0, backoffMs: 0, rotating: true };
+  }
   const h = 取健康(egressUrl);
   h.failures += 1;
   h.lastError = String(reason).slice(0, 200);
@@ -620,6 +644,7 @@ function 描述条目(entry, now = Date.now()) {
     host: entry.direct ? "direct" : 展示主机(entry.url),
     enabled: entry.enabled,
     weight: entry.weight,
+    rotating: Boolean(entry.rotating),
     state: !entry.enabled ? "disabled" : cooling ? "cooling" : "ready",
     cooldownMsLeft: cooling ? Math.max(0, h.cooldownUntil - now) : 0,
     cooldownUntil: cooling ? h.cooldownUntil : 0,

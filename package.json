@@ -1,6 +1,6 @@
 {
   "name": "fucking-opencode",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "OpenAI-compatible gateway to OpenCode free-tier models (no account required), self-adapting to gate changes",
   "main": "server.js",
   "bin": {

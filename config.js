@@ -12,6 +12,8 @@ const 默认值 = {
   maxBodyBytes: 10 * 1024 * 1024,
   autoUpdate: true,
   modelGroups: {},
+  reasoningEffort: "",
+  reasoningEffortByModel: {},
 };
 
 const 环境变量名 = {
@@ -20,6 +22,8 @@ const 环境变量名 = {
   maxBodyBytes: "MAX_BODY_BYTES",
   autoUpdate: "AUTO_UPDATE",
   modelGroups: "FUCKING_OPENCODE_MODEL_GROUPS",
+  reasoningEffort: "REASONING_EFFORT",
+  reasoningEffortByModel: "REASONING_EFFORT_BY_MODEL",
 };
 
 const 数值范围 = {
@@ -65,6 +69,37 @@ function 校验(原始) {
     if (键 === "autoUpdate") {
       if (typeof 输入 !== "boolean") 问题.push("autoUpdate 必须是布尔值。");
       else 值.autoUpdate = 输入;
+      continue;
+    }
+    if (键 === "reasoningEffort") {
+      const 级别 = ["", "none", "minimal", "low", "medium", "high", "xhigh", "max"];
+      if (typeof 输入 !== "string" || !级别.includes(输入.trim().toLowerCase())) {
+        问题.push(`reasoningEffort 必须是 ${级别.filter(Boolean).join("|")} 之一。`);
+      } else {
+        值.reasoningEffort = 输入.trim().toLowerCase();
+      }
+      continue;
+    }
+    if (键 === "reasoningEffortByModel") {
+      if (!输入 || typeof 输入 !== "object" || Array.isArray(输入)) {
+        问题.push("reasoningEffortByModel 必须是对象：模型 ID → 级别。");
+        continue;
+      }
+      const 级别 = ["none", "minimal", "low", "medium", "high", "xhigh", "max"];
+      const 映射 = {};
+      for (const [模型, 级别值] of Object.entries(输入)) {
+        if (!模型.trim() || 模型.length > 200) {
+          问题.push(`reasoningEffortByModel 模型 ID 无效：${模型}`);
+          continue;
+        }
+        const 文本 = typeof 级别值 === "string" ? 级别值.trim().toLowerCase() : "";
+        if (!级别.includes(文本)) {
+          问题.push(`reasoningEffortByModel['${模型}'] 级别无效。`);
+          continue;
+        }
+        映射[模型.trim()] = 文本;
+      }
+      值.reasoningEffortByModel = 映射;
       continue;
     }
     if (键 === "modelGroups") {
@@ -154,6 +189,19 @@ function 解析环境(键) {
     if (文本 === "0" || 文本.toLowerCase() === "false") return { 值: false, 来源: "env" };
     if (文本 === "1" || 文本 === "force" || 文本.toLowerCase() === "true") return { 值: true, 来源: "env" };
     return undefined;
+  }
+  if (键 === "reasoningEffort") {
+    const { 问题 } = 校验({ reasoningEffort: 文本 });
+    return 问题.length ? undefined : { 值: 文本.toLowerCase(), 来源: "env" };
+  }
+  if (键 === "reasoningEffortByModel") {
+    try {
+      const parsed = JSON.parse(文本);
+      const { 问题, 值 } = 校验({ reasoningEffortByModel: parsed });
+      return 问题.length ? undefined : { 值: 值.reasoningEffortByModel, 来源: "env" };
+    } catch {
+      return undefined;
+    }
   }
   if (键 === "modelGroups") {
     try {

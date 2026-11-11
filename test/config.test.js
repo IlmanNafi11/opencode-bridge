@@ -82,6 +82,40 @@ describe("运行时配置", () => {
     assert.equal(snap.sources.defaultModel, "env");
   });
 
+  it("reads reasoning effort defaults, per-model overrides, and rejects invalid levels", () => {
+    assert.equal(config.取("reasoningEffort"), "");
+    assert.deepEqual(config.取("reasoningEffortByModel"), {});
+
+    写配置({
+      reasoningEffort: "HIGH",
+      reasoningEffortByModel: { "longcat-2.5-preview-free": "minimal" },
+    });
+    const snap = config.__reload();
+    assert.equal(config.取("reasoningEffort"), "high");
+    assert.equal(config.取("reasoningEffortByModel")["longcat-2.5-preview-free"], "minimal");
+    assert.equal(snap.sources.reasoningEffort, "file");
+
+    写配置({ reasoningEffort: "ultra" });
+    const bad = config.__reload();
+    assert.equal(config.取("reasoningEffort"), "");
+    assert.match(bad.error, /reasoningEffort/);
+  });
+
+  it("环境变量覆盖 reasoning effort", () => {
+    写配置({ reasoningEffort: "low" });
+    process.env.REASONING_EFFORT = "high";
+    process.env.REASONING_EFFORT_BY_MODEL = JSON.stringify({ "mimo-v2.6-flash-free": "max" });
+    try {
+      const snap = config.快照();
+      assert.equal(config.取("reasoningEffort"), "high");
+      assert.equal(config.取("reasoningEffortByModel")["mimo-v2.6-flash-free"], "max");
+      assert.equal(snap.sources.reasoningEffort, "env");
+    } finally {
+      delete process.env.REASONING_EFFORT;
+      delete process.env.REASONING_EFFORT_BY_MODEL;
+    }
+  });
+
   it("拒绝越界数值但接受其余字段", () => {
     写配置({ defaultModel: "kept", upstreamTimeoutMs: 5 });
     const snap = config.__reload();

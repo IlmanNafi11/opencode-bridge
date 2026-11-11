@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.1.6] — 2026-11-11
+
+Stall detection and quota hygiene, matching opencode2api where it matters:
+
+- **First-event timeout.** `FIRST_EVENT_TIMEOUT_MS` (default `15000`, `0`
+  disables) applies to the first SSE byte. An upstream that answers `200` and
+  then goes silent is canceled, its exit is cooled, and the client gets a fast
+  `504 first_event_timeout` instead of hanging until the 120 s deadline.
+- **Anonymous-lane circuit breaker.** `ANON_BACKOFF_THRESHOLD` (default `0`,
+  off), `ANON_BACKOFF_BASE_HOURS` (1), `ANON_BACKOFF_MAX_HOURS` (24). After N
+  final `429`/IP-abuse rejections the anonymous lane pauses with exponential
+  backoff, persisted in `<state>/anon-backoff.json`; paused requests get an
+  immediate `429 anonymous_lane_paused` with `Retry-After`. A success resets it.
+- **Per-egress-block cooldown.** When a WARP lane is parked for quota, its
+  IPv6 `/64` (IPv4 `/32`) stays out of the pool for 30 minutes, so a lane that
+  re-registers onto the same prefix cannot quietly reuse an exhausted block.
+- **Rotating proxy pool entries.** `pool+http://…` or `http://…#pool` marks an
+  endpoint that assigns a new IP per connection. Such entries never cool down
+  and are never excluded by retry logic.
+- **Reasoning effort defaults.** `config.json` / env `REASONING_EFFORT` and
+  `REASONING_EFFORT_BY_MODEL` (JSON model → level) fill `reasoning_effort`
+  when the client omits it; an explicit client value always wins.
+
 ## [0.1.5] — 2026-11-11
 
 Free-tier resilience, modelled on how opencode2api survives per-IP quota:

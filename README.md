@@ -66,16 +66,16 @@ step) with a matching `.sha256` file:
 
 | Platform | Archive |
 | --- | --- |
-| Linux x86_64 | `fucking-opencode_v0.1.5_linux_amd64.tar.gz` |
-| Linux arm64 | `fucking-opencode_v0.1.5_linux_arm64.tar.gz` |
-| macOS Intel | `fucking-opencode_v0.1.5_darwin_amd64.tar.gz` |
-| macOS Apple silicon | `fucking-opencode_v0.1.5_darwin_arm64.tar.gz` |
-| Windows x86_64 | `fucking-opencode_v0.1.5_windows_amd64.zip` |
-| Windows arm64 | `fucking-opencode_v0.1.5_windows_arm64.zip` |
+| Linux x86_64 | `fucking-opencode_v0.1.6_linux_amd64.tar.gz` |
+| Linux arm64 | `fucking-opencode_v0.1.6_linux_arm64.tar.gz` |
+| macOS Intel | `fucking-opencode_v0.1.6_darwin_amd64.tar.gz` |
+| macOS Apple silicon | `fucking-opencode_v0.1.6_darwin_arm64.tar.gz` |
+| Windows x86_64 | `fucking-opencode_v0.1.6_windows_amd64.zip` |
+| Windows arm64 | `fucking-opencode_v0.1.6_windows_arm64.zip` |
 
 ```bash
-tar -xzf fucking-opencode_v0.1.5_linux_amd64.tar.gz
-cd fucking-opencode-0.1.5
+tar -xzf fucking-opencode_v0.1.6_linux_amd64.tar.gz
+cd fucking-opencode-0.1.6
 ./fucking-opencode          # or: bun server.js
 ```
 
@@ -225,6 +225,7 @@ docker run -d --name fucking-opencode \
 | `UPSTREAM_PROXY_URL` | *(unset)* | Lock egress to one HTTP/HTTPS proxy |
 | `UPSTREAM_PROXY_POOL` | *(unset)* | Lock egress to a pool, comma- or newline-separated |
 | `UPSTREAM_PROXY_STRATEGY` | `round-robin` | `round-robin`, `failover`, or `random` |
+| — | — | Add `#pool` (or `pool+`) to a pool URL to mark a rotating endpoint: new IP per connection, never cooled down |
 | `AUTO_UPDATE` | `1` | Check for updates every six hours; skipped inside a git checkout |
 | `WARP_MANAGE` | `0` | `1` enables the optional `/api/warp` connect/disconnect controls for a host-installed `warp-cli` |
 | `ALLOW_NODE` | *(unset)* | Bypass the Bun guard for offline tests only |
@@ -233,6 +234,12 @@ docker run -d --name fucking-opencode \
 | `MAX_INFLIGHT_WAIT_MS` | `30000` | Queue wait before `429 gateway_busy`; `0` fails immediately |
 | `METRICS_TOKEN` | *(unset)* | Require `Authorization: Bearer` on `/metrics` |
 | `UPSTREAM_EGRESS_RETRIES` | `3` | Exit swaps per request when the upstream answers `429`, an IP-level `403`, or `5xx`; `0` disables. |
+| `FIRST_EVENT_TIMEOUT_MS` | `15000` | Abort and cool an exit when a `200` upstream sends no first SSE event; `0` disables |
+| `ANON_BACKOFF_THRESHOLD` | `0` | Consecutive final `429`/IP-abuse rejections before the anonymous lane pauses; `0` disables |
+| `ANON_BACKOFF_BASE_HOURS` | `1` | First pause length; doubles per trip |
+| `ANON_BACKOFF_MAX_HOURS` | `24` | Pause ceiling |
+| `REASONING_EFFORT` | *(empty)* | Default `reasoning_effort` when the client omits it (`none`…`max`) |
+| `REASONING_EFFORT_BY_MODEL` | *(empty)* | JSON object of model → level, overriding `REASONING_EFFORT` per model |
 | `PANEL_TLS_CERT` / `PANEL_TLS_KEY` | *(unset)* | Serve panel, API, and inference over HTTPS on both listeners when both are set |
 
 Changing a credential or proxy in the panel applies immediately. Other
@@ -240,8 +247,9 @@ environment changes require a restart.
 
 `config.json` (path overridable with `FUCKING_OPENCODE_CONFIG`) accepts
 `defaultModel` (string), `upstreamTimeoutMs` (1000–600000),
-`maxBodyBytes` (1024–104857600), `autoUpdate` (boolean), and `modelGroups`
-(alias → ordered model list, max 20). Precedence is environment > file >
+`maxBodyBytes` (1024–104857600), `autoUpdate` (boolean), `modelGroups`
+(alias → ordered model list, max 20), `reasoningEffort` (string level), and
+`reasoningEffortByModel` (model → level). Precedence is environment > file >
 built-in default. Edits apply within one second, no restart; invalid values are
 rejected and the last valid snapshot stays active. `GET /api/config` returns the
 effective values, their source, and the last parse error.
@@ -273,7 +281,10 @@ feature disabled.
 runs one userspace WireGuard tunnel per device (UDP packets, no TUN, no
 Docker), and exposes one SOCKS5 listener per exit on `127.0.0.1:40001..`.
 The gateway spawns it and registers the lanes in the existing proxy pool, so
-health checks, cooldowns, and the panel need no special case.
+health checks, cooldowns, and the panel need no special case. When a lane is
+parked for quota, its `/64` (or IPv4 `/32`) stays out of the pool for 30
+minutes: a lane that re-registers onto the same prefix cannot reuse exhausted
+quota.
 
 ```bash
 cd warp-farm && go build -o warp-farm.exe .   # once per machine

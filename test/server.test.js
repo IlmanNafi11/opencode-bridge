@@ -1,6 +1,9 @@
 const { describe, it, before, after, beforeEach } = require("node:test");
 const assert = require("node:assert/strict");
 const http = require("node:http");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
 const pkg = require("../package.json");
 const {
   VERSION,
@@ -163,7 +166,7 @@ describe("server unit & integration tests", () => {
     });
     const { upstreamBody, aliasToOriginal } = buildUpstreamPayload(
       {
-        model: "longcat-2.5-preview-free",
+        model: "big-pickle",
         max_tokens: 50,
         tool_choice: "none",
         messages: [{ role: "user", content: "hi" }],
@@ -466,6 +469,121 @@ describe("server unit & integration tests", () => {
         completion_tokens: 512,
         total_tokens: 632,
       });
+    });
+
+    it("applies configured reasoning effort when the client omits it, and keeps an explicit client value", async () => {
+      const previousStateDir = process.env.FUCKING_OPENCODE_STATE_DIR;
+      const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "ofb-effort-test-"));
+      process.env.FUCKING_OPENCODE_STATE_DIR = stateDir;
+      let capturedBody = null;
+      mockFetchImpl = async (_url, init) => {
+        capturedBody = JSON.parse(init.body);
+        return {
+          ok: true,
+          status: 200,
+          body: sseStreamFromLines([
+            'data: {"choices":[{"index":0,"delta":{"content":"ok"},"finish_reason":"stop"}],"usage":null}\n\n',
+            "data: [DONE]\n\n",
+          ]),
+        };
+      };
+
+      process.env.REASONING_EFFORT = "high";
+      try {
+        const first = await httpRequest(port, "POST", "/v1/chat/completions", {
+          model: "big-pickle",
+          stream: false,
+          messages: [{ role: "user", content: "hi" }],
+        });
+        assert.equal(first.status, 200);
+        assert.equal(capturedBody.reasoning_effort, "high");
+
+        capturedBody = null;
+        const second = await httpRequest(port, "POST", "/v1/chat/completions", {
+          model: "big-pickle",
+          stream: false,
+          reasoning_effort: "minimal",
+          messages: [{ role: "user", content: "hi" }],
+        });
+        assert.equal(second.status, 200);
+        assert.equal(capturedBody.reasoning_effort, "minimal", "the client must win");
+      } finally {
+        delete process.env.REASONING_EFFORT;
+        if (previousStateDir === undefined) delete process.env.FUCKING_OPENCODE_STATE_DIR;
+        else process.env.FUCKING_OPENCODE_STATE_DIR = previousStateDir;
+        fs.rmSync(stateDir, { recursive: true, force: true });
+      }
+    });
+
+    it("returns 504 quickly when upstream accepts the request but never sends a first event", async () => {
+      const previousStateDir = process.env.FUCKING_OPENCODE_STATE_DIR;
+      const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "ofb-first-event-"));
+      process.env.FUCKING_OPENCODE_STATE_DIR = stateDir;
+      mockFetchImpl = async () => ({
+        ok: true,
+        status: 200,
+        body: new ReadableStream({
+          start() {
+            // Headers arrived; the body never yields a byte.
+          },
+        }),
+      });
+      process.env.FIRST_EVENT_TIMEOUT_MS = "50";
+      try {
+        const started = Date.now();
+        const res = await httpRequest(port, "POST", "/v1/chat/completions", {
+          model: "big-pickle",
+          stream: false,
+          messages: [{ role: "user", content: "hi" }],
+        });
+        assert.equal(res.status, 504);
+        assert.equal(res.body.error.type, "first_event_timeout");
+        assert.ok(Date.now() - started < 2000, "must not hang for the upstream timeout");
+      } finally {
+        delete process.env.FIRST_EVENT_TIMEOUT_MS;
+        if (previousStateDir === undefined) delete process.env.FUCKING_OPENCODE_STATE_DIR;
+        else process.env.FUCKING_OPENCODE_STATE_DIR = previousStateDir;
+        fs.rmSync(stateDir, { recursive: true, force: true });
+      }
+    });
+
+    it("pauses the anonymous lane after repeated final 429s when the breaker is enabled", async () => {
+      const previousStateDir = process.env.FUCKING_OPENCODE_STATE_DIR;
+      const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "ofb-breaker-test-"));
+      process.env.FUCKING_OPENCODE_STATE_DIR = stateDir;
+      process.env.ANON_BACKOFF_THRESHOLD = "1";
+      mockFetchImpl = async () => ({
+        ok: false,
+        status: 429,
+        headers: new Headers({ "content-type": "application/json" }),
+        text: async () =>
+          JSON.stringify({ error: { type: "FreeUsageLimitError", message: "quota exhausted" } }),
+      });
+      try {
+        require("../server").__resetAnonymousBackoff();
+        require("../proxy").setPool({ entries: [] });
+        const first = await httpRequest(port, "POST", "/v1/chat/completions", {
+          model: "big-pickle",
+          messages: [{ role: "user", content: "hi" }],
+        });
+        assert.equal(first.status, 429);
+        assert.notEqual(first.body.error.type, "anonymous_lane_paused");
+
+        const second = await httpRequest(port, "POST", "/v1/chat/completions", {
+          model: "big-pickle",
+          messages: [{ role: "user", content: "hi" }],
+        });
+        assert.equal(second.status, 429);
+        assert.equal(second.body.error.type, "anonymous_lane_paused");
+        assert.ok(Number(second.headers["retry-after"]) > 0);
+      } finally {
+        delete process.env.ANON_BACKOFF_THRESHOLD;
+        require("../server").__resetAnonymousBackoff();
+        require("../proxy").setPool({ entries: [] });
+        if (previousStateDir === undefined) delete process.env.FUCKING_OPENCODE_STATE_DIR;
+        else process.env.FUCKING_OPENCODE_STATE_DIR = previousStateDir;
+        fs.rmSync(stateDir, { recursive: true, force: true });
+      }
     });
 
     it("propagates finish_reason='length' on Responses API incomplete and restores aliased client tool names", async () => {

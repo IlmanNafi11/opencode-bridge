@@ -371,6 +371,30 @@ describe("egress pool", () => {
     assert.equal(proxy.parsePoolEntry("http://d:4", 0).entry.weight, 1);
   });
 
+  it("treats #pool and pool+ entries as rotating endpoints that never cool down", () => {
+    const spec = proxy.parsePoolSpec("pool+http://r:1, http://s:2#pool, http://n:3");
+    assert.equal(spec.errors.length, 0);
+    assert.deepEqual(
+      spec.entries.map((e) => [e.url, e.rotating]),
+      [
+        ["http://r:1", true],
+        ["http://s:2", true],
+        ["http://n:3", false],
+      ]
+    );
+
+    const saved = proxy.setPool({ entries: ["pool+http://r:1"], strategy: "round-robin" });
+    assert.equal(saved.ok, true);
+    assert.equal(proxy.pick().url, "http://r:1");
+
+    const failed = proxy.markFailure("http://r:1", { reason: "allowance 429", cooldownMs: 60000 });
+    assert.equal(failed.rotating, true);
+    const entry = proxy.describe().pool.entries[0];
+    assert.equal(entry.rotating, true);
+    assert.equal(entry.state, "ready", "a rotating endpoint is new-IP-per-connection");
+    assert.equal(proxy.pick().url, "http://r:1");
+  });
+
   it("refuses a malformed or duplicated entry instead of installing half a pool", () => {
     assert.ok(proxy.parsePoolSpec("not a url").errors.length > 0);
     assert.equal(proxy.parsePoolEntry({}, 3).ok, false);
