@@ -855,7 +855,7 @@ function applyLang(lang) {
   if (dict) translateRoot(document.body, dict);
   $$("[data-lang]").forEach((btn) => btn.setAttribute("aria-pressed", btn.dataset.lang === lang ? "true" : "false"));
   $("crumb").textContent = tr(VIEWS[currentView]);
-  document.title = tr(VIEWS[currentView]) + " · Fucking Opencode " + (document.body.dataset.version || "");
+  document.title = tr(VIEWS[currentView]) + " · Fucking Opencode";
   // 动态渲染的区块（用量页）需要按新语言重建文字。
   document.dispatchEvent(new CustomEvent("panel-lang", { detail: lang }));
 }
@@ -917,7 +917,7 @@ function go(view, opts) {
     else btn.removeAttribute("aria-current");
   });
   $("crumb").textContent = tr(VIEWS[view]);
-  document.title = tr(VIEWS[view]) + " · Fucking Opencode " + (document.body.dataset.version || "");
+  document.title = tr(VIEWS[view]) + " · Fucking Opencode";
   if (view === "overview") loadOverviewMetrics();
   else if (view === "health") loadHealthView();
   else if (view === "diag") 载入路由诊断();
@@ -2852,18 +2852,18 @@ function renderPanel(description, { version = "", port = "", authRequired = fals
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
-<title>概览 · Fucking Opencode ${version}</title>
+<title>概览 · Fucking Opencode</title>
 <link rel="icon" type="image/png" href="/panel-avatar.png">
 <style>${STYLE}</style>
 </head>
-<body data-auth-required="${authRequired ? "true" : "false"}" data-panel-key="${escapeHtml(apiKey)}" data-version="${version}">
+<body data-auth-required="${authRequired ? "true" : "false"}" data-panel-key="${escapeHtml(apiKey)}">
 <a class="skip" href="#main">跳到主内容</a>
 <div class="app" id="app">
   <aside class="sidebar" id="sidebar" aria-label="主导航">
     <div class="brand">
       <img class="brand-mark brand-avatar" src="/panel-avatar.png" alt="" onerror="this.hidden=true">
       <div class="brand-text">
-        <span class="brand-name" title="Fucking Opencode ${version}">Fucking Opencode ${version}</span>
+        <span class="brand-name" title="Fucking Opencode">Fucking Opencode</span>
         <span class="brand-sub js-version">本地运维面板</span>
       </div>
     </div>
@@ -2941,7 +2941,7 @@ function renderPanel(description, { version = "", port = "", authRequired = fals
         <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="3" width="11" height="10" rx="1.5"/><path d="M6.5 3v10"/></svg>
       </button>
       <div class="crumb">
-        <span class="crumb-root">Fucking Opencode ${version}</span>
+        <span class="crumb-root">Fucking Opencode</span>
         <span class="crumb-sep">/</span>
         <strong id="crumb">概览</strong>
       </div>
@@ -3581,7 +3581,7 @@ function renderLogin({ version = "", port = "" } = {}) {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
-<title>Masuk · Fucking Opencode ${version}</title>
+<title>Masuk · Fucking Opencode</title>
 <link rel="icon" type="image/png" href="/panel-avatar.png">
 <style>${STYLE}</style>
 </head>
@@ -3589,7 +3589,7 @@ function renderLogin({ version = "", port = "" } = {}) {
 <div class="login-wrap">
   <div class="login-card">
     <img class="login-avatar" src="/panel-avatar.png" alt="" onerror="this.hidden=true">
-    <h1>Fucking Opencode ${version}</h1>
+    <h1>Fucking Opencode</h1>
     <p class="login-sub" id="login-sub">Masuk untuk membuka panel operasi gateway.</p>
     <form id="login-form" novalidate>
       <div class="field">
