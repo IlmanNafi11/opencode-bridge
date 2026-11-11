@@ -146,4 +146,20 @@ describe("运行时配置", () => {
     await child.exited;
     child = null;
   });
+
+  it("写入合并文件并拒绝非法值", () => {
+    写配置({ defaultModel: "old-model", upstreamTimeoutMs: 20000 });
+    const ok = config.写入({ defaultModel: "new-model", autoUpdate: false });
+    assert.equal(ok.ok, true);
+    const onDisk = JSON.parse(fs.readFileSync(configFile, "utf8"));
+    assert.equal(onDisk.defaultModel, "new-model");
+    assert.equal(onDisk.upstreamTimeoutMs, 20000);
+    assert.equal(onDisk.autoUpdate, false);
+    assert.equal(config.取("defaultModel"), "new-model");
+
+    const bad = config.写入({ upstreamTimeoutMs: 10 });
+    assert.equal(bad.ok, false);
+    assert.match(bad.error, /upstreamTimeoutMs/);
+    assert.equal(JSON.parse(fs.readFileSync(configFile, "utf8")).defaultModel, "new-model");
+  });
 });

@@ -2400,6 +2400,17 @@ function createSessionId(descending = true, timestamp = Date.now()) {
   return getSessionPrefix() + createId(descending, timestamp);
 }
 
+/**
+ * 新项目 id：40 个十六进制字符，与 CLI 的 `sha1("git-remote:…")` 同形。
+ *
+ * 免费档按 (项目 id, 出口网段) 记账。固定一个项目 id 就等于把所有请求塞
+ * 进同一份额度桶，桶烧穿后整个出口一起 429。逐请求/逐重试换一个新 id，
+ * 形状仍是 CLI 会发出的 sha1 十六进制，额度记账却是新的。
+ */
+function createProjectId() {
+  return crypto.randomBytes(20).toString("hex");
+}
+
 function getState() {
   return {
     recipe: getRecipe(),
@@ -2550,6 +2561,7 @@ module.exports = {
   GATE_ANCHOR_HEADER_NAMES,
   getSessionPrefix,
   createSessionId,
+  createProjectId,
   getToolList,
   getState,
   __reset,

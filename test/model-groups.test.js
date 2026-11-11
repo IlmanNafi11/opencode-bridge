@@ -71,4 +71,18 @@ describe("模型组候选与冷却", () => {
     groups.记录成功("a-free");
     assert.deepEqual(groups.候选("sota"), ["a-free", "b-free"]);
   });
+
+  it("重置清空全部冷却并删除持久化条目", () => {
+    process.env.FUCKING_OPENCODE_MODEL_GROUPS = JSON.stringify({
+      sota: ["a-free", "b-free"],
+    });
+    groups.记录失败("a-free", 429);
+    groups.记录失败("b-free", 404);
+    const result = groups.重置();
+    assert.equal(result.ok, true);
+    assert.equal(result.cleared, 2);
+    assert.deepEqual(groups.诊断(), []);
+    assert.deepEqual(groups.候选("sota"), ["a-free", "b-free"]);
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(tmpDir, "model-health.json"), "utf8")), {});
+  });
 });

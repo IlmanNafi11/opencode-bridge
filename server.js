@@ -95,6 +95,23 @@ const WARP_FALLBACK = {
   启用: () => false,
 };
 let warp = 加载本地模块("warp", WARP_FALLBACK);
+// WARP farm sidecar（Go）：N 个 WARP 出口 → N 个本地 SOCKS5 监听，无需 Docker，
+// 也无需 TUN。本模块只管理子进程与代理池；lane 对网关来说就是普通 SOCKS5 代理。
+const WARP_FARM_FALLBACK = {
+  状态: () => ({ running: false, lanes: [], settings: {}, binaryAvailable: false, error: "warp-farm.js 未安装" }),
+  启动: async () => ({ ok: false, error: "warp-farm.js 未安装" }),
+  停止: async () => ({ ok: false, error: "warp-farm.js 未安装" }),
+  重启动: async () => ({ ok: false, error: "warp-farm.js 未安装" }),
+  轮换: async () => ({ ok: false, error: "warp-farm.js 未安装" }),
+  刷新: async () => ({ running: false, lanes: [] }),
+  应用到池: () => ({ ok: false, error: "warp-farm.js 未安装" }),
+  自动启动: async () => ({ ok: false, skipped: true }),
+  设置: () => ({}),
+  保存设置: () => ({ ok: false, error: "warp-farm.js 未安装" }),
+  日志: () => [],
+};
+const warpFarm = 加载本地模块("warp-farm", WARP_FARM_FALLBACK);
+const WARP轮换间隔 = new Map();
 
 /**
  * 本服务按相对路径 require 的本地模块。自更新器用它拒绝会装出
@@ -631,6 +648,38 @@ function 记录出口失败(state, { reason, cooldownMs = null } = {}) {
   const pool = proxy.describe().pool;
   if (!pool || !pool.active) return;
   proxy.markFailure(url, { reason, cooldownMs });
+  可能轮换WARP出口(url, reason);
+}
+
+/**
+ * Lane WARP yang kuotanya habis tidak akan pulih sendiri: alamat egress-nya
+ * tetap sama. Jadi saat lane itu menolak (429/kuota/gate) atau tidak bisa
+ * dial, minta farm mendaftarkan exit baru dan menukarnya di port yang sama.
+ * Debounce 60 detik per lane supaya satu burst request tidak memicu enam
+ * pendaftaran Cloudflare.
+ */
+function 可能轮换WARP出口(url, reason) {
+  if (!url || !/^socks5:\/\//i.test(String(url))) return;
+  const lanes = (warpFarm.状态() || {}).lanes || [];
+  const lane = lanes.find((entry) => entry && entry.url === url);
+  if (!lane) return;
+  const 额度耗尽 = /429|quota|kuota|free.?tier|capacity|gate/i.test(String(reason || ""));
+  const 传输失败 = /^transport:/i.test(String(reason || ""));
+  if (!额度耗尽 && !传输失败) return;
+  const now = Date.now();
+  if (now - (WARP轮换间隔.get(lane.port) || 0) < 60000) return;
+  WARP轮换间隔.set(lane.port, now);
+  warpFarm
+    .轮换(lane.port)
+    .then((result) => {
+      if (result && result.ok) {
+        console.log(`[fucking-opencode] WARP farm lane ${lane.index} 轮换出口（${reason || "transport"}）`);
+        记录事件(`WARP farm lane ${lane.index} 轮换出口：${reason || "transport"}`, "info");
+      } else if (result && result.error) {
+        console.warn(`[fucking-opencode] WARP farm lane ${lane.index} 轮换失败：${result.error}`);
+      }
+    })
+    .catch(() => {});
 }
 
 function isValidV2UserAgent(ua) {
@@ -1677,16 +1726,30 @@ function 取项目标识() {
   }
 }
 
-function buildUpstreamHeaders(req, sessionId) {
+// 项目 id 的额度重置模式。`random`（默认）逐请求铸造一个新的 sha1 形状
+// id，让免费档按项目 id 记账的额度桶永不累积；`derived` 保留 CLI 忠实
+// 推导（调试/gate 诊断用）。客户端自带 x-opencode-project 时永远优先。
+const 项目重置模式 = String(process.env.OPENCODE_PROJECT_MODE || "random")
+  .trim()
+  .toLowerCase() === "derived"
+  ? "derived"
+  : "random";
+
+function 新项目标识() {
+  return 项目重置模式 === "derived" ? 取项目标识() : identity.createProjectId();
+}
+
+function buildUpstreamHeaders(req, sessionId, projectOverride = null) {
   const downstreamUa = req?.headers?.["user-agent"] || "";
   const ua = isValidV2UserAgent(downstreamUa) ? downstreamUa : 网关安全UA();
   const client = req?.headers?.["x-opencode-client"];
   // `x-opencode-project` 不是常量：CLI 对仓库推导为
   // `sha1("git-remote:" + host + path)`，对目录推导为 `sha1("directory:" + path)`，
-  // 否则取目录里 `opencode` 文件的内容。发字面量 "global" 是 CLI
-  // 从不产生的形状，所以按同样方式推导 —— 从本桥自己的 checkout。
-  // 客户端自带该头仍然优先。
-  const project = req?.headers?.["x-opencode-project"] || 取项目标识();
+  // 否则取目录里 `opencode` 文件的内容。本桥默认逐请求换新 id
+  // （OPENCODE_PROJECT_MODE=random）以重置按项目记账的免费额度；
+  // `derived` 恢复 CLI 忠实形状。客户端自带该头始终优先。
+  const project =
+    req?.headers?.["x-opencode-project"] || projectOverride || 新项目标识();
   // 网关头集合由 identity.js 从上游自己的请求构造器推导，上游新增
   // 的头在刷新后的下一个请求开始发送。本桥推导不出值的头上报
   // 而不发空值：必填头发空值比缺席更糟。
@@ -2096,6 +2159,100 @@ async function 处理WARPAPI(req, res) {
   });
 }
 
+/**
+ * `/api/warp-farm` —— 控制 Go sidecar `warp-farm`: start, stop, rotate, atau
+ * terapkan lane-nya ke pool proxy. GET = status (proses, lane, log akhir).
+ *
+ * Tidak ada kredensial di status: hanya URL SOCKS5 loopback dan egress publik
+ * dari trace Cloudflare. Semua aksi lewat gerbang admin yang sama dengan
+ * `/api/proxy` (sesi panel, Host, dan Content-Type JSON).
+ */
+async function 处理WARPFarmAPI(req, res) {
+  const send = (status, body) => {
+    res.writeHead(status, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+    res.end(JSON.stringify(body));
+  };
+
+  if (req.method === "GET" || req.method === "HEAD") {
+    await warpFarm.刷新().catch(() => null);
+    return send(200, warpFarm.状态());
+  }
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "GET, POST");
+    return send(405, { error: "Gunakan GET untuk status atau POST untuk aksi." });
+  }
+
+  let payload = {};
+  try {
+    const text = await readRequestBody(req, 4096);
+    payload = text ? JSON.parse(text) : {};
+  } catch (err) {
+    return send(err.statusCode === 413 ? 413 : 400, { error: `请求体无效：${err.message}` });
+  }
+
+  switch (payload.action) {
+    case "start": {
+      const result = await warpFarm.启动({
+        size: payload.size,
+        basePort: payload.basePort,
+        stack: payload.stack,
+        sourceIpv6: payload.sourceIpv6,
+        timeoutMs: payload.timeoutMs,
+        applyToPool: payload.applyToPool !== false,
+      });
+      记录事件(
+        `WARP farm start：${result.ok ? `${result.ready || 0} lane siap` : result.error || "gagal"}`,
+        result.ok ? "info" : "warn"
+      );
+      return send(result.ok ? 200 : 502, result);
+    }
+    case "stop": {
+      const result = await warpFarm.停止();
+      记录事件("WARP farm stop", "info");
+      return send(200, { ...result, status: warpFarm.状态() });
+    }
+    case "rotate": {
+      const result = await warpFarm.轮换(payload.port || null);
+      if (result.ok && payload.applyToPool !== false) {
+        warpFarm.应用到池(result);
+      }
+      return send(result.ok ? 200 : 502, result);
+    }
+    case "restart": {
+      const result = await warpFarm.重启动({
+        size: payload.size,
+        basePort: payload.basePort,
+        stack: payload.stack,
+        sourceIpv6: payload.sourceIpv6,
+        timeoutMs: payload.timeoutMs,
+        applyToPool: payload.applyToPool !== false,
+      });
+      记录事件(
+        `WARP farm restart：${result.ok ? `${result.ready || 0} lane siap` : result.error || "gagal"}`,
+        result.ok ? "info" : "warn"
+      );
+      return send(result.ok ? 200 : 502, { ...result, status: warpFarm.状态() });
+    }
+    case "settings": {
+      const saved = warpFarm.保存设置({
+        size: payload.size,
+        basePort: payload.basePort,
+        stack: payload.stack,
+        sourceIpv6: payload.sourceIpv6,
+      });
+      if (!saved.ok) return send(400, saved);
+      return send(200, { ...saved, status: warpFarm.状态() });
+    }
+    case "applyPool": {
+      const status = await warpFarm.刷新();
+      const result = warpFarm.应用到池(status);
+      return send(result.ok ? 200 : 409, { ...result, status });
+    }
+    default:
+      return send(400, { error: "action 只能是 start, stop, rotate 或 applyPool。" });
+  }
+}
+
 function readRequestBody(req, maxBytes = 请求体上限()) {
   // 提前拒绝：客户端声明巨大 body 时，一个字节都不读就拒绝，
   // 而不是先缓冲到上限。
@@ -2303,6 +2460,36 @@ async function 处理请求主体(req, res) {
     return res.end(JSON.stringify(runtimeConfig.快照()));
   }
 
+  if (pathname === "/api/config" && req.method === "POST") {
+    const denied = adminRequestError(req);
+    if (denied) {
+      res.writeHead(403, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+      return res.end(JSON.stringify({ error: denied }));
+    }
+    if (!panelAuthorized(req)) return panelUnauthorized(res);
+    const type = String(req.headers?.["content-type"] || "").split(";")[0].trim().toLowerCase();
+    if (type !== "application/json") {
+      res.writeHead(415, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+      return res.end(JSON.stringify({ error: "Content-Type harus application/json." }));
+    }
+    let payload = {};
+    try {
+      const text = await readRequestBody(req, 256 * 1024);
+      payload = text ? JSON.parse(text) : {};
+    } catch (err) {
+      res.writeHead(err.statusCode === 413 ? 413 : 400, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+      return res.end(JSON.stringify({ error: `请求体无效：${err.message}` }));
+    }
+    const result = runtimeConfig.写入(payload);
+    if (!result.ok) {
+      res.writeHead(400, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+      return res.end(JSON.stringify(result));
+    }
+    记录事件("运行时配置已更新（/api/config）", "info");
+    res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+    return res.end(JSON.stringify(result));
+  }
+
   if (pathname === "/api/settings") {
     const denied = adminRequestError(req);
     if (denied) {
@@ -2312,7 +2499,7 @@ async function 处理请求主体(req, res) {
     if (!panelAuthorized(req)) return panelUnauthorized(res);
     if (req.method === "GET") {
       res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
-      return res.end(JSON.stringify({ ...panelSettings.describe(), defaultModel: 默认模型值() || "" }));
+      return res.end(JSON.stringify({ ...panelSettings.describe(), defaultModel: 默认模型值() || "", projectMode: 项目重置模式 }));
     }
     if (req.method === "POST") {
       const type = String(req.headers?.["content-type"] || "").split(";")[0].trim().toLowerCase();
@@ -2366,7 +2553,7 @@ async function 处理请求主体(req, res) {
         panelSetCookie(res);
       }
       res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
-      return res.end(JSON.stringify({ ok: true, ...panelSettings.describe(), defaultModel: 默认模型值() || "" }));
+      return res.end(JSON.stringify({ ok: true, ...panelSettings.describe(), defaultModel: 默认模型值() || "", projectMode: 项目重置模式 }));
     }
     res.writeHead(405, { "Content-Type": "application/json", "Cache-Control": "no-store" });
     return res.end(JSON.stringify({ error: "Method not allowed." }));
@@ -2434,6 +2621,28 @@ async function 处理请求主体(req, res) {
       }
     }
     处理WARPAPI(req, res).catch((err) => {
+      if (res.headersSent) return res.destroy();
+      res.writeHead(500, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+      res.end(JSON.stringify({ error: `Kesalahan internal: ${err.message}` }));
+    });
+    return;
+  }
+
+  if (pathname === "/api/warp-farm") {
+    const denied = adminRequestError(req);
+    if (denied) {
+      res.writeHead(403, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+      return res.end(JSON.stringify({ error: denied }));
+    }
+    if (!panelAuthorized(req)) return panelUnauthorized(res);
+    if (req.method === "POST") {
+      const type = String(req.headers?.["content-type"] || "").split(";")[0].trim().toLowerCase();
+      if (type !== "application/json") {
+        res.writeHead(415, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+        return res.end(JSON.stringify({ error: "Content-Type harus application/json." }));
+      }
+    }
+    处理WARPFarmAPI(req, res).catch((err) => {
       if (res.headersSent) return res.destroy();
       res.writeHead(500, { "Content-Type": "application/json", "Cache-Control": "no-store" });
       res.end(JSON.stringify({ error: `Kesalahan internal: ${err.message}` }));
@@ -2892,7 +3101,7 @@ async function 处理请求主体(req, res) {
             await upstreamRes.text();
           } catch {}
           const retry5xxSid = 重造会话标识(req, body, sessionId);
-          const retry5xxHeaders = buildUpstreamHeaders(req, retry5xxSid);
+          const retry5xxHeaders = buildUpstreamHeaders(req, retry5xxSid, identity.createProjectId());
           console.warn(
             `[fucking-opencode] 上游返回 ${first5xx}` +
               (firstLogId ? ` [x-opencode-log-id: ${firstLogId}]` : "") +
@@ -3049,7 +3258,7 @@ async function 处理请求主体(req, res) {
             ));
             liveEndpoints = 解析端点(targetModel);
             upstreamUrl = useResponses ? liveEndpoints.responsesUrl : liveEndpoints.chatUrl;
-            retryHeaders = buildUpstreamHeaders(req, retrySessionId);
+            retryHeaders = buildUpstreamHeaders(req, retrySessionId, identity.createProjectId());
             upstreamRes = await 上游抓取(upstreamUrl, {
               method: "POST",
               headers: retryHeaders,
@@ -3742,6 +3951,66 @@ async function 处理请求主体(req, res) {
     return res.end(JSON.stringify(out));
   }
 
+  // 面板日志：事件环 + WARP farm sidecar 的 stdout/stderr 尾部。
+  if (pathname === "/api/logs" && req.method === "GET") {
+    if (!panelAuthorized(req)) return panelUnauthorized(res);
+    const 地址 = new URL(req.url, `http://${req.headers?.host || "127.0.0.1"}`);
+    const lines = Math.min(500, Math.max(10, Number(地址.searchParams.get("lines")) || 200));
+    res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+    return res.end(
+      JSON.stringify({
+        events: 事件环.slice(-lines),
+        farm: warpFarm.日志(lines),
+        last: 事件序号,
+      })
+    );
+  }
+
+  // 清空模型冷却（面板「模型冷却」表的重置按钮）。
+  if (pathname === "/api/model-health/reset" && req.method === "POST") {
+    const denied = adminRequestError(req);
+    if (denied) {
+      res.writeHead(403, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+      return res.end(JSON.stringify({ error: denied }));
+    }
+    if (!panelAuthorized(req)) return panelUnauthorized(res);
+    const type = String(req.headers?.["content-type"] || "").split(";")[0].trim().toLowerCase();
+    if (type !== "application/json") {
+      res.writeHead(415, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+      return res.end(JSON.stringify({ error: "Content-Type harus application/json." }));
+    }
+    const result = 模型组.重置();
+    记录事件(`模型冷却已清空（${result.cleared} 条）`, "info");
+    res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+    return res.end(JSON.stringify({ ...result, cooldowns: 模型组.诊断() }));
+  }
+
+  // 额度摘要：近 24 小时的 429/失败计数、模型冷却与 farm lane 就绪数。
+  if (pathname === "/api/quota" && req.method === "GET") {
+    if (!panelAuthorized(req)) return panelUnauthorized(res);
+    const diag =
+      用量统计 && 用量统计.诊断汇总 ? 用量统计.诊断汇总({ hours: 24 }) : { total: 0, models: [], egress: [] };
+    const farm = warpFarm.状态();
+    const rate429 = (diag.models || []).reduce((n, m) => n + (m.rate429 || 0), 0);
+    const fail = (diag.models || []).reduce((n, m) => n + (m.fail || 0), 0);
+    res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+    return res.end(
+      JSON.stringify({
+        hours: 24,
+        total: diag.total || 0,
+        rate429,
+        fail,
+        cooldowns: 模型组.诊断().length,
+        farm: {
+          running: Boolean(farm.running),
+          ready: (farm.lanes || []).filter((lane) => lane.ready).length,
+          lanes: (farm.lanes || []).length,
+        },
+        gate: 上次网关诊断 || null,
+      })
+    );
+  }
+
   // 用量统计与请求历史（面板标签页的数据源）。
   if (pathname === "/api/stats" || pathname === "/api/history" || pathname === "/api/history/clear") {
     if (!panelAuthorized(req)) return panelUnauthorized(res);
@@ -4135,6 +4404,30 @@ if (require.main === module) {
   repairMissingModules().catch(() => {});
   // 发现跑后台：上游一应答 /v1/models 即上线。启动绝不在网络上阻塞。
   discoverModels().catch(() => {});
+  // WARP farm 仅在 WARP_FARM=1 时自启。启动本身是异步的（注册 WARP 可能
+  // 被 Cloudflare 限流），所以绝不在监听端口前等待。
+  warpFarm
+    .自动启动()
+    .then((result) => {
+      if (!result || result.skipped) return;
+      if (result.ok) {
+        const applied = warpFarm.应用到池(warpFarm.状态());
+        if (!applied || !applied.ok) {
+          console.warn(`[fucking-opencode] WARP farm 已启动，但写入代理池失败：${(applied && applied.error) || "unknown"}`);
+        }
+        console.log(
+          `[fucking-opencode] WARP farm: ${result.ready || 0}/${(result.lanes || []).length} lane siap ` +
+            `(control ${warpFarm.controlUrl ? warpFarm.controlUrl() : "-"}, pool ${applied && applied.ok ? "ok" : "gagal"})`
+        );
+      } else {
+        console.warn(`[fucking-opencode] WARP farm 未启动：${result.error || "unknown"}`);
+      }
+    })
+    .catch(() => {});
+  setInterval(() => {
+    const state = warpFarm.状态();
+    if (state && state.running) warpFarm.刷新().catch(() => {});
+  }, 30000).unref();
   // 模型清单按上游的节奏轮换，所以留定时器。IDENTITY 不留：它按请求路径
   // 惰性刷新（见 identity.ensureFresh），空闲的桥一个网络调用都不发。
   setInterval(discoverModels, DISCOVERY_TTL_MS).unref();
@@ -4180,6 +4473,7 @@ module.exports = {
   resolveEndpoints: 解析端点,
   buildUpstreamHeaders,
   getProjectId: 取项目标识,
+  newProjectId: 新项目标识,
   extractResponsesFinishReason: 提取Responses结束原因,
   extractStreamError: 提取流错误,
   getPersistentSessionId,

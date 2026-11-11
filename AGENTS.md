@@ -107,6 +107,16 @@ curl -s http://127.0.0.1:20134/v1/chat/completions \
 
 `<状态目录>/config.json`（可用 `FUCKING_OPENCODE_CONFIG` 改路径）支持 `defaultModel`（字符串）、`upstreamTimeoutMs`（1000–600000）、`maxBodyBytes`（1024–104857600）、`autoUpdate`（布尔）、`modelGroups`（别名 → 有序模型数组，最多 20 个）。优先级为环境变量 > 文件 > 内置默认值。改文件后约一秒内生效，无需重启；非法值被拒绝，上一份有效配置继续服务。`GET /api/config`（需面板会话）返回生效值、来源与最近的解析错误。
 
+面板新增菜单与端点：`GET /api/logs`（事件环 + sidecar 日志尾）、`POST /api/config`（写 `config.json`，非法值整体拒绝）、`POST /api/model-health/reset`（清空模型冷却）、`GET /api/quota`（24 小时 429/失败计数、冷却数、farm lane 就绪数）。`/api/settings` 的响应带 `projectMode`（`OPENCODE_PROJECT_MODE`）。
+
+侧栏固定为 6 个分组（概览 / 出口 / 诊断 / 用量 / 接入 / 设置），组内旧页面变成子标签；`VIEW_GROUPS` 与 `GROUP_OF` 在 `panel.js` 的 `SCRIPT` 顶部定义，`go(view)` 接受视图名或分组名，`#warpfarm`、`#pool` 等旧深链仍然有效。新增界面文案必须同时补 `I18N.patch.id` 与 `I18N.patch.en`；带数字或运行时值的句子用 `translatePattern` 规则，不要用 `tr()` 拼整句（切语言时无法还原）。
+
+`OPENCODE_PROJECT_MODE` 控制 `x-opencode-project` 来源：默认 `random` 逐请求铸造新的 sha1 形状 id（免费档按项目 id 记账，换 id 即换额度桶），`derived` 恢复从本 checkout 推导的 CLI 忠实值。客户端自带该头始终优先；5xx 与 gate 重试还会额外换新项目 id。
+
+### WARP farm（可选，无 Docker）
+
+`WARP_FARM=1` 时 `server.js` 启动 `warp-farm/warp-farm[.exe]`（Go，需先 `cd warp-farm && go build -o warp-farm.exe .`），把每个 lane 的 `socks5://127.0.0.1:40001..` 注册进现有代理池。`WARP_FARM_SIZE`（默认 8）、`WARP_FARM_STACK`（默认 `ipv6`，唯一 `/64` 出口；`ipv4` 是共享 NAT）、`WARP_FARM_SOURCE_IPV6`（可选外层前缀）。lane 遇 `429`/额度或传输失败时网关自动让 farm 换注册（同端口，60 秒去抖）。`GET /api/warp-farm` 查看；POST `start|stop|rotate|restart|applyPool|settings` 管理，`settings` 把 `size/basePort/stack/sourceIpv6` 持久化到 `<状态目录>/warp-farm.json`，启动参数缺省时优先用它（显式环境变量仍生效）。Go 目录是独立 GPL-3.0 程序，不链接进 `server.js`。
+
 模型组别名先走第一个候选；在未向客户端写出任何字节前遇到 `404`/`410`/`429`/`5xx` 就切下一个。失败模型记入 `<状态目录>/model-health.json` 冷却（`404` 5 分钟、`429` 1 分钟、`5xx` 30 秒），后续请求跳过直到冷却结束。可用 `FUCKING_OPENCODE_MODEL_GROUPS`（JSON）临时覆盖组定义，优先级高于文件。
 
 ### WARP 管理（可选）
@@ -223,7 +233,7 @@ Error: remote port forwarding failed for listen port 20136
 | 文件 | 职责 |
 |---|---|
 | `server.js` | HTTP 服务器（`/` 处的面板、`/v1/chat/completions`、`/v1/models`、`/health`、带 `adminRequestError` CSRF/Host 防护的 `/api/proxy`）、Bun 运行时守卫、对 `proxy.js`/`panel.js` 的容错加载以及 `repairMissingModules()`，使半安装的树也能启动并自愈、可配置的 DNS 结果顺序（`DNS_RESULT_ORDER`）、会话亲和性缓存、客户端工具别名（`read` -> `read_client`）、SSE 流规范化（`reasoning_content`、`usage`、`finish_reason`）、带 30 秒 IP 冷却重试抑制（`GATE_RETRY_COOLDOWN_MS`）的 403/426/404 响应式重试循环、终止性 IP 滥用分支（`X-OpenCode-Gate: ip-abuse`，不刷新/重试）、出口代理（推理、发现和自更新时使用 `proxy.netFetch`）以及可选的 `UPSTREAM_RELAY_URL` 中继（`x-relay-target` / `x-relay-path`），还有 6 小时自更新器（`checkAndApplyUpdate`），它会暂存传入的 `server.js` 所需的任何模块，即使正在运行的 `UPDATE_FILES` 列表早于该模块。 |
-| `identity.js` | 自适应 OpenCode CLI 同步：发布握手（`opencode.ai/update/api`）、GitHub 源码获取器（`identifier.ts`、`session-id.ts`、`app.ts`、`model-request.ts`、`tool/plugin/*.ts`、`codemode/tool.ts`）、Effect Schema AST 解析器（`extractToolFromSource`）、提供方目录解析器与磁盘缓存（`~/.fucking-opencode/cache/catalog.json`）、30 秒强制刷新冷却（`GATE_REFRESH_COOLDOWN_MS`）、终止性 `isIpAbuseRejection` 守卫，以及池化 CSPRNG 会话 ID 生成器（`createSessionId`）。 |
+| `identity.js` | 自适应 OpenCode CLI 同步：发布握手（`opencode.ai/update/api`）、GitHub 源码获取器（`identifier.ts`、`session-id.ts`、`app.ts`、`model-request.ts`、`tool/plugin/*.ts`、`codemode/tool.ts`）、Effect Schema AST 解析器（`extractToolFromSource`）、提供方目录解析器与磁盘缓存（`~/.fucking-opencode/cache/catalog.json`）、30 秒强制刷新冷却（`GATE_REFRESH_COOLDOWN_MS`）、终止性 `isIpAbuseRejection` 守卫，以及池化 CSPRNG 会话 ID 生成器（`createSessionId`）与项目 ID 生成器（`createProjectId`，逐请求换新以重置按项目记账的免费额度；`OPENCODE_PROJECT_MODE=derived` 恢复 CLI 忠实推导）。 |
 | `token-budget.js` | 加法式 token 预算计算（推理模型为 `max(requested, 1024) + 4096`，标准模型为 `max(requested, 512)`），由目录 `modelFacts` 驱动。 |
 | `proxy.js` | 出口：URL 校验（HTTP/HTTPS/SOCKS5，凭据需百分号编码）、在 `<state dir>/proxy.json`（权限 `0600`）中为单个代理和代理池持久化、带面板锁定的 `UPSTREAM_PROXY_URL`/`UPSTREAM_PROXY_POOL` 覆盖、按条目健康检查与指数冷却（`markFailure`/`markSuccess`/`pick`），持久化在 `<state dir>/pool-health.json`（权限 `0600`，以出口身份的截断 SHA-256 为键，因此绝不会重复代理凭据，通过重命名写入，拒绝立即生效 / 成功合并写入）、`withProxy`/`netFetch`（显式出口参数）供 `server.js` 和 `identity.js` 中的每次出站调用使用，以及 `testProxy`/`testPool`（上游探测 + `cdn-cgi/trace` 出口 IP）。 |
 | `egress-proxy.js` | 无依赖的 HTTP 代理，用于把主机变成代理池成员：CONNECT 加绝对 URI HTTP、可选的 `EGRESS_PROXY_TOKEN`（Basic，仅密码）、未认证的 `/healthz`。默认绑定回环地址；可达性由隧道负责。 |
@@ -231,7 +241,9 @@ Error: remote port forwarding failed for listen port 20136
 | `config.js` | 读取 `<状态目录>/config.json`（或 `FUCKING_OPENCODE_CONFIG`），优先级 env > 文件 > 默认值，按 mtime 热加载，校验非法值并保留上一份有效配置。 |
 | `model-groups.js` | 模型组别名解析与候选排序，失败模型按 `404`/`429`/`5xx` 冷却并持久化到 `<状态目录>/model-health.json`。 |
 | `warp.js` | 可选的 Cloudflare WARP 控制：探测 `warp-cli`，解析 `status`，执行 `connect`/`disconnect`；仅 `WARP_MANAGE=1` 时动作生效。 |
-| `panel.js` | 在 `/` 提供的 HTML 面板：同源表单，读写 `/api/proxy`，在不暴露凭据的情况下显示实时状态，并对每个配置值进行转义。 |
+| `warp-farm.js` | Go sidecar 桥：找/运行 `warp-farm` 二进制，轮询 control HTTP，把 lane 注册进现有代理池，失败/额度耗尽时轮换 lane（每 lane 60 秒去抖）。`WARP_FARM=1` 开机自启；`GET|POST /api/warp-farm` 提供 status/start/stop/rotate/restart/applyPool/settings。 |
+| `warp-farm/` | 独立 Go 模块（GPL-3.0-or-later，见 `NOTICE.md`）：N 个 WARP 注册 → 每注册一个 userspace WireGuard（UDP，无 TUN）→ 每个 exit 一个回环 SOCKS5 listener（`40001..`）+ 回环 control HTTP。不通过 Docker；与网关只经 SOCKS5/HTTP 通信。 |
+| `panel.js` | 在 `/` 提供的 HTML 面板：概览/健康/诊断/事件/日志/出口/代理池/WARP 农场/统计/历史/接入点/文档/测试台/设置 视图，同源表单读写 `/api/*`，对每个配置值转义，不暴露凭据。 |
 | `transport-fingerprint.js` | 针对本地 TCP 监听器捕获运行时的原始 TLS `ClientHello` 字节，并将加密套件和扩展顺序与 `transport-baseline.json` 比较。 |
 | `gate-drill.js` | 端到端自愈演练套件（4 个在线演练 + 6 个确定性离线演练，包括 `full-corrupt`）。 |
 | `verify.js` | 在线模型就绪检查器（`bun verify.js` / `bun verify.js --quick`）；发送 `stream: true`，并在 `gate-closed`（`403` 且带 `X-OpenCode-Gate: ip-throttled` 或 `ip-abuse`，或免费层/滥用消息）**以及第一个 `429` 额度**处立即停止 —— 两者都意味着必须停止扫描，以免延长 IP 冷却。 |

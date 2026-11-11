@@ -100,6 +100,12 @@ a:hover { color: var(--accent); }
 .nav-item:hover { background: var(--surface-2); color: var(--ink); }
 .nav-item[aria-current="page"] { background: var(--accent-soft); color: var(--ink); font-weight: 600; }
 .nav-item[aria-current="page"] .nav-icon { color: var(--accent); }
+.subnav { display: flex; flex-wrap: wrap; gap: 4px; padding: 14px 24px 0; border-bottom: 1px solid var(--rule); margin-bottom: 4px; }
+.subnav[hidden] { display: none; }
+.subnav button { border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--muted); font: inherit; font-size: 13px; padding: 6px 10px; cursor: pointer; }
+.subnav button:hover { color: var(--ink); }
+.subnav button[aria-current="page"] { color: var(--ink); border-bottom-color: var(--accent); font-weight: 600; }
+@media (max-width: 860px) { .subnav { padding: 10px 16px 0; } }
 .nav-icon { flex: 0 0 16px; color: var(--muted); }
 .nav-badge { margin-left: auto; padding: 2px 7px; border: 1px solid var(--rule); border-radius: 999px; background: var(--surface-2); color: var(--muted); font: 600 10.5px/1.4 var(--mono); }
 .nav-badge[hidden] { display: none; }
@@ -383,7 +389,19 @@ const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 const AUTH_REQUIRED = document.body.getAttribute("data-auth-required") === "true";
 const PANEL_API_KEY = document.body.getAttribute("data-panel-key") || "";
 
-const VIEWS = { overview: "概览", health: "健康检查", diag: "路由诊断", events: "事件流", egress: "出口代理", pool: "代理池", stats: "用量统计", history: "请求历史", endpoint: "接入点", docs: "API 文档", playground: "测试台", settings: "设置" };
+const VIEWS = { overview: "概览", health: "健康检查", diag: "路由诊断", events: "事件流", logs: "日志", egress: "出口代理", pool: "代理池", warpfarm: "WARP 农场", stats: "用量统计", history: "请求历史", endpoint: "接入点", docs: "API 文档", playground: "测试台", settings: "设置" };
+
+// 侧栏只暴露这些分组；分组内的页面通过页头下方的子标签切换。
+const VIEW_GROUPS = {
+  overview: ["overview", "health"],
+  egress: ["egress", "pool", "warpfarm"],
+  diagnose: ["diag", "events", "logs"],
+  usage: ["stats", "history"],
+  developer: ["endpoint", "docs", "playground"],
+  settings: ["settings"],
+};
+const GROUP_OF = {};
+for (const g of Object.keys(VIEW_GROUPS)) for (const v of VIEW_GROUPS[g]) GROUP_OF[v] = g;
 
 // ---- 多语言 ----
 // 静态文案按中文原文查表替换；动态内容交给 MutationObserver。
@@ -665,6 +683,48 @@ Object.assign(I18N.patch.id, {
   "本机保存的 API key 已全部删除。": "Semua API key yang tersimpan di mesin ini dihapus.",
   "连续成功": "Sukses beruntun", "模型冷却": "Pendinginan model",
   "冷却原因": "Alasan pendingin", "剩余": "Sisa",
+  "WARP 农场": "WARP Farm", "日志": "Log", "清空冷却": "Kosongkan pendingin",
+  "LANE 数量（1–32）": "Jumlah LANE (1–32)", "起始端口": "Port awal", "协议栈": "Stack protokol",
+  "IPv6 源地址（可选）": "Alamat sumber IPv6 (opsional)", "参数": "Parameter",
+  "启动": "Mulai", "停止": "Hentikan", "重启": "Restart", "全部轮换": "Rotasi semua",
+  "应用到代理池": "Terapkan ke pool", "拨号": "Dial", "动作": "Aksi", "轮换": "Rotasi",
+  "测出口": "Uji egress", "sidecar 未运行": "Sidecar tidak berjalan",
+  "运行中": "Berjalan", "已停止": "Berhenti", "已请求启动。": "Permintaan mulai dikirim.",
+  "已停止。": "Dihentikan.", "已重启。": "Di-restart.", "已轮换全部 lane。": "Semua lane dirotasi.",
+  "已把 lane 写入代理池。": "Lane ditulis ke pool.", "lane 已轮换。": "Lane dirotasi.",
+  "参数已保存；重启后生效。": "Parameter tersimpan; berlaku setelah restart.",
+  "读取 farm 状态失败：": "Gagal membaca status farm: ", "行数": "Baris", "网关": "Gateway",
+  "暂无事件。": "Belum ada event.", "未启动。": "Belum dijalankan.",
+  "运行配置": "Konfigurasi runtime", "上游超时（毫秒）": "Timeout hulu (ms)",
+  "请求体上限（字节）": "Batas body (byte)", "自动更新": "Update otomatis",
+  "模型组（JSON：别名 → 模型数组）": "Grup model (JSON: alias → array model)",
+  "保存配置": "Simpan konfigurasi", "配置已保存并生效。": "Konfigurasi tersimpan dan aktif.",
+  "身份": "Identitas", "project 模式": "Mode project", "下游 key": "Key hilir", "说明": "Catatan",
+  "额度（24 小时）": "Kuota (24 jam)", "统计窗口": "Jendela statistik", "FARM LANE": "LANE FARM",
+  "已清空 ": "Dibersihkan ", " 条模型冷却。": " pendingin model.",
+  "基端口": "Port dasar", "控制端口": "Port kontrol", "二进制": "Biner",
+  "就绪": "siap", "未找到": "tidak ditemukan", "可用": "tersedia", "24 小时": "24 jam", "错误": "Kesalahan", "小时": "jam",
+  "诊断": "Diagnostik", "用量": "Pemakaian", "接入": "Akses",
+  "测试失败。": "Uji gagal.", "完成。": "Selesai.", "轮换中": "Merotasi", "未就绪": "Belum siap",
+  "双栈": "Dual-stack", "保存参数": "Simpan parameter", "sidecar 日志": "Log sidecar",
+  "超时与请求体上限必须是数字。": "Timeout dan batas body harus berupa angka.",
+  "参数写入状态目录的": "Parameter ditulis ke ",
+  "；重启或下次启动生效。": " di direktori state; berlaku setelah restart atau start berikutnya.",
+  "写入": "Ditulis ke ",
+  "，下一次请求生效；环境变量优先级更高时 source 显示为 env。": ", berlaku pada permintaan berikutnya; bila variabel env lebih diutamakan, source menampilkan env.",
+  "留空 = 由客户端指定": "Kosongkan = ditentukan klien",
+  "derived（CLI 一致）": "derived (sama dengan CLI)", "random（每请求新 project）": "random (project baru tiap permintaan)",
+  "固定派生 project id，与官方 CLI 行为一致。": "Project id diturunkan tetap, sama seperti CLI resmi.",
+  "每个请求新建 40 位 hex project id，重置按项目记账的免费额度。": "Project id hex 40 digit baru tiap permintaan, mereset kuota gratis yang dihitung per project.",
+  "进程存活即 ok": "Hidup = ok", "端口": "Port",
+  "Go sidecar 在本机开 N 条 Cloudflare WARP 隧道（userspace WireGuard，无 Docker、无 TUN），每条 lane 暴露一个 SOCKS5 出口并自动加入代理池。": "Sidecar Go membuka N terowongan Cloudflare WARP (userspace WireGuard, tanpa Docker/TUN) di mesin ini; tiap lane mengekspos satu egress SOCKS5 dan otomatis masuk pool.",
+  "IPv6（每个 /64 独立）": "IPv6 (satu /64 per lane)",
+  "路由诊断已刷新。": "Diagnostik rute diperbarui.", "最近 500 条": "500 terbaru",
+  "网关事件环与 WARP farm sidecar 的尾部输出，只读本机。": "Cincin event gateway dan tail sidecar WARP farm; hanya baca lokal.",
+  "OpenAI 兼容客户端直接指向这里。面板只应绑定回环地址；登录密码与 API key 在「设置」里配置。": "Klien kompatibel OpenAI mengarah langsung ke sini. Panel sebaiknya hanya di-bind ke loopback; kata sandi login dan API key diatur di「Pengaturan」.",
+  "读取可选的 Cloudflare WARP 状态。": "Baca status Cloudflare WARP opsional.",
+  "连接或断开 WARP（需 WARP_MANAGE=1）。": "Sambungkan atau putuskan WARP (perlu WARP_MANAGE=1).",
+  "开启": "Aktif", "关闭": "Nonaktif",
 });
 
 Object.assign(I18N.patch.en, {
@@ -697,6 +757,48 @@ Object.assign(I18N.patch.en, {
   "本机保存的 API key 已全部删除。": "All API keys saved on this machine were deleted.",
   "连续成功": "Success streak", "模型冷却": "Model cooldowns",
   "冷却原因": "Cooldown reason", "剩余": "Remaining",
+  "WARP 农场": "WARP Farm", "日志": "Log", "清空冷却": "Clear cooldowns",
+  "LANE 数量（1–32）": "LANE count (1–32)", "起始端口": "Base port", "协议栈": "Protocol stack",
+  "IPv6 源地址（可选）": "IPv6 source (optional)", "参数": "Parameters",
+  "启动": "Start", "停止": "Stop", "重启": "Restart", "全部轮换": "Rotate all",
+  "应用到代理池": "Apply to pool", "拨号": "Dials", "动作": "Actions", "轮换": "Rotate",
+  "测出口": "Test egress", "sidecar 未运行": "Sidecar is not running",
+  "运行中": "Running", "已停止": "Stopped", "已请求启动。": "Start requested.",
+  "已停止。": "Stopped.", "已重启。": "Restarted.", "已轮换全部 lane。": "All lanes rotated.",
+  "已把 lane 写入代理池。": "Lanes written to the pool.", "lane 已轮换。": "Lane rotated.",
+  "参数已保存；重启后生效。": "Parameters saved; they apply after a restart.",
+  "读取 farm 状态失败：": "Failed to read farm status: ", "行数": "Lines", "网关": "Gateway",
+  "暂无事件。": "No events yet.", "未启动。": "Not running.",
+  "运行配置": "Runtime config", "上游超时（毫秒）": "Upstream timeout (ms)",
+  "请求体上限（字节）": "Request body limit (bytes)", "自动更新": "Auto update",
+  "模型组（JSON：别名 → 模型数组）": "Model groups (JSON: alias → model array)",
+  "保存配置": "Save config", "配置已保存并生效。": "Config saved and active.",
+  "身份": "Identity", "project 模式": "Project mode", "下游 key": "Downstream key", "说明": "Note",
+  "额度（24 小时）": "Quota (24h)", "统计窗口": "Stats window", "FARM LANE": "FARM LANE",
+  "已清空 ": "Cleared ", " 条模型冷却。": " model cooldowns.",
+  "基端口": "Base port", "控制端口": "Control port", "二进制": "Binary",
+  "就绪": "ready", "未找到": "not found", "可用": "available", "24 小时": "24 hours", "错误": "Error", "小时": "hours",
+  "诊断": "Diagnostics", "用量": "Usage", "接入": "Developer",
+  "测试失败。": "Test failed.", "完成。": "Done.", "轮换中": "Rotating", "未就绪": "Not ready",
+  "双栈": "Dual-stack", "保存参数": "Save parameters", "sidecar 日志": "Sidecar log",
+  "超时与请求体上限必须是数字。": "Timeout and body limit must be numbers.",
+  "参数写入状态目录的": "Parameters are written to ",
+  "；重启或下次启动生效。": " in the state directory; they apply after a restart or the next start.",
+  "写入": "Written to ",
+  "，下一次请求生效；环境变量优先级更高时 source 显示为 env。": ", applied on the next request; when the env var wins, source shows env.",
+  "留空 = 由客户端指定": "Leave empty = set by the client",
+  "derived（CLI 一致）": "derived (matches the CLI)", "random（每请求新 project）": "random (new project per request)",
+  "固定派生 project id，与官方 CLI 行为一致。": "Fixed derived project id, matching the official CLI.",
+  "每个请求新建 40 位 hex project id，重置按项目记账的免费额度。": "New 40-hex project id per request, resetting per-project free quota.",
+  "进程存活即 ok": "Alive means ok", "端口": "Port",
+  "Go sidecar 在本机开 N 条 Cloudflare WARP 隧道（userspace WireGuard，无 Docker、无 TUN），每条 lane 暴露一个 SOCKS5 出口并自动加入代理池。": "The Go sidecar opens N Cloudflare WARP tunnels (userspace WireGuard, no Docker/TUN) on this host; each lane exposes one SOCKS5 egress and joins the pool automatically.",
+  "IPv6（每个 /64 独立）": "IPv6 (one /64 per lane)",
+  "路由诊断已刷新。": "Route diagnostics refreshed.", "最近 500 条": "Latest 500",
+  "网关事件环与 WARP farm sidecar 的尾部输出，只读本机。": "Gateway event ring plus the WARP farm sidecar tail; local read-only.",
+  "OpenAI 兼容客户端直接指向这里。面板只应绑定回环地址；登录密码与 API key 在「设置」里配置。": "OpenAI-compatible clients point straight here. Bind the panel to loopback only; the login password and API key live in 「Settings」.",
+  "读取可选的 Cloudflare WARP 状态。": "Read optional Cloudflare WARP status.",
+  "连接或断开 WARP（需 WARP_MANAGE=1）。": "Connect or disconnect WARP (requires WARP_MANAGE=1).",
+  "开启": "On", "关闭": "Off",
 });
 
 let panelLang = "id";
@@ -787,6 +889,14 @@ function translatePattern(text) {
   if ((m = text.match(/^([\\d.]+) 秒$/))) return m[1] + (id ? " detik" : " s");
   if ((m = text.match(/^冷却至 (.*)$/))) return (id ? "Cooldown sampai " : "Cooling until ") + m[1];
   if ((m = text.match(/^最近拒绝：(.*)$/))) return (id ? "Penolakan terbaru: " : "Latest refusal: ") + m[1];
+  if ((m = text.match(/^(\\d+) \\/ (\\d+) 就绪$/))) return m[1] + " / " + m[2] + (id ? " siap" : " ready");
+  if ((m = text.match(/^已清空 (\\d+) 条模型冷却。$/))) return (id ? "Dibersihkan " : "Cleared ") + m[1] + (id ? " pendingin model." : " model cooldowns.");
+  if ((m = text.match(/^(.*) 正常，(\\d+) 毫秒，出口 (.*)$/))) return id ? m[1] + " normal, " + m[2] + " md, egress " + m[3] : m[1] + " OK, " + m[2] + " ms, egress " + m[3];
+  if ((m = text.match(/^(\\d+) 小时$/))) return m[1] + (id ? " jam" : " hours");
+  if ((m = text.match(/^读取 farm 状态失败：(.*)$/))) return (id ? "Gagal membaca status farm: " : "Failed to read farm status: ") + m[1];
+  if ((m = text.match(/^读取配置失败：(.*)$/))) return (id ? "Gagal membaca konfigurasi: " : "Failed to read config: ") + m[1];
+  if ((m = text.match(/^模型组 JSON 无效：(.*)$/))) return (id ? "JSON grup model tidak valid: " : "Invalid model-groups JSON: ") + m[1];
+  if ((m = text.match(/^(\\d+) 行$/))) return m[1] + (id ? " baris" : " lines");
   return null;
 }
 
@@ -901,15 +1011,40 @@ function setEmpty(box, title, text) {
   box.hidden = false;
 }
 
+function renderSubnav(group, view) {
+  const bar = $("subnav");
+  if (!bar) return;
+  const tabs = VIEW_GROUPS[group] || [];
+  if (tabs.length < 2) {
+    bar.hidden = true;
+    bar.replaceChildren();
+    return;
+  }
+  bar.hidden = false;
+  bar.replaceChildren(
+    ...tabs.map((v) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.dataset.go = v;
+      btn.textContent = VIEWS[v];
+      if (v === view) btn.setAttribute("aria-current", "page");
+      return btn;
+    })
+  );
+}
+
 function go(view, opts) {
   const options = opts || {};
+  if (VIEW_GROUPS[view]) view = VIEW_GROUPS[view][0];
   if (!VIEWS[view]) view = "overview";
+  const group = GROUP_OF[view] || "overview";
   currentView = view;
   $$(".view").forEach((el) => el.classList.toggle("is-active", el.dataset.view === view));
   $$(".nav-item[data-go]").forEach((btn) => {
-    if (btn.dataset.go === view) btn.setAttribute("aria-current", "page");
+    if (btn.dataset.go === group) btn.setAttribute("aria-current", "page");
     else btn.removeAttribute("aria-current");
   });
+  renderSubnav(group, view);
   $("crumb").textContent = tr(VIEWS[view]);
   document.title = tr(VIEWS[view]) + " · Fucking Opencode";
   if (view === "overview") loadOverviewMetrics();
@@ -921,9 +1056,14 @@ function go(view, opts) {
     if (btn) btn.click();
   }
   else if (view === "egress") 载入WARP();
+  else if (view === "warpfarm") loadFarm();
+  else if (view === "logs") 载入日志();
   else if (view === "docs") loadDocs();
   else if (view === "playground") loadPlayground();
-  else if (view === "settings") loadSettings();
+  else if (view === "settings") {
+    loadSettings();
+    loadConfigEditor();
+  }
   if (options.hash !== false && location.hash !== "#" + view) history.replaceState(null, "", "#" + view);
   closePalette();
   closeNav();
@@ -937,7 +1077,7 @@ document.addEventListener("click", (event) => {
 
 window.addEventListener("hashchange", () => {
   const view = location.hash.replace("#", "");
-  go(VIEWS[view] ? view : "overview", { hash: false, scroll: false });
+  go(VIEWS[view] || VIEW_GROUPS[view] ? view : "overview", { hash: false, scroll: false });
 });
 
 const app = $("app");
@@ -992,22 +1132,22 @@ const palette = $("palette");
 const paletteInput = $("palette-input");
 const paletteList = $("palette-list");
 
-function navButtons() {
-  return $$(".nav-item[data-go]");
+function paletteEntries() {
+  return Object.keys(VIEWS).map((key) => ({ go: key, label: VIEWS[key], group: GROUP_OF[key] || "overview" }));
 }
 
 function renderPalette(query) {
   const q = query.trim().toLowerCase();
-  const matches = navButtons().filter((btn) => {
+  const matches = paletteEntries().filter((entry) => {
     if (!q) return true;
-    return btn.textContent.trim().toLowerCase().includes(q) || btn.dataset.go.includes(q);
+    return entry.label.toLowerCase().includes(q) || entry.go.includes(q) || entry.group.includes(q);
   });
-  const nodes = matches.map((btn, index) => {
+  const nodes = matches.map((entry, index) => {
     const li = document.createElement("li");
     li.className = "palette-item" + (index === 0 ? " is-active" : "");
     li.setAttribute("role", "option");
-    li.textContent = btn.textContent.trim();
-    li.dataset.go = btn.dataset.go;
+    li.textContent = entry.label;
+    li.dataset.go = entry.go;
     return li;
   });
   if (!nodes.length) {
@@ -2166,6 +2306,21 @@ function 接线路由诊断() {
     await 载入路由诊断();
     btn.disabled = false;
   });
+  const coolReset = $("diag-cool-reset");
+  if (coolReset) {
+    coolReset.addEventListener("click", async () => {
+      coolReset.disabled = true;
+      try {
+        const body = await postJson("/api/model-health/reset", {});
+        await 载入路由诊断();
+        showReport($("diag-report"), [line("已清空 " + (body.cleared || 0) + " 条模型冷却。", "ok")]);
+      } catch (err) {
+        showReport($("diag-report"), [line(err.message, "bad")]);
+      } finally {
+        coolReset.disabled = false;
+      }
+    });
+  }
   $("events-pause").addEventListener("click", () => {
     事件流状态.暂停 = !事件流状态.暂停;
     const btn = $("events-pause");
@@ -2309,6 +2464,7 @@ async function loadHealthView() {
       })
     );
     raw.textContent = JSON.stringify(health, null, 2);
+    await 载入额度();
     showReport($("health-report"), [line("已读取 /health。", "ok")]);
   } catch (err) {
     box.replaceChildren();
@@ -2566,6 +2722,20 @@ async function loadSettings() {
   try {
     const settings = await readJson(await fetch("/api/settings"));
     renderCredentials(settings);
+    const mode = settings.projectMode === "derived" ? "derived（CLI 一致）" : "random（每请求新 project）";
+    const modeEl = $("ident-mode");
+    if (modeEl) modeEl.textContent = settings.projectMode || "random";
+    fillKv($("ident-body"), [
+      ["project 模式", mode],
+      ["默认模型", settings.defaultModel || "由客户端指定"],
+      ["下游 key", (Array.isArray(settings.apiKeys) ? settings.apiKeys.length : 0) + " 个"],
+      [
+        "说明",
+        settings.projectMode === "derived"
+          ? "固定派生 project id，与官方 CLI 行为一致。"
+          : "每个请求新建 40 位 hex project id，重置按项目记账的免费额度。",
+      ],
+    ]);
   } catch (err) {
     const preview = $("cred-key-preview");
     if (preview) preview.textContent = "读取凭据失败：" + err.message;
@@ -2803,6 +2973,288 @@ $("pref-days").addEventListener("change", () => {
 
 $("pref-theme").addEventListener("click", () => themeBtn.click());
 
+// ---- WARP farm ----
+const STACK_LABELS = { ipv6: "IPv6", ipv4: "IPv4", dual: "双栈" };
+
+async function postJson(path, payload) {
+  const res = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload || {}),
+  });
+  return readJson(res);
+}
+
+function farmLogText(rows) {
+  return (rows || [])
+    .map((row) => new Date(row.at).toLocaleTimeString("zh-CN", { hour12: false }) + " " + (row.stream || "") + " " + row.line)
+    .join("\\n");
+}
+
+function renderFarmSettings(settings) {
+  const cfg = settings || {};
+  if ($("farm-size")) $("farm-size").value = cfg.size != null ? String(cfg.size) : "";
+  if ($("farm-base-port")) $("farm-base-port").value = cfg.basePort != null ? String(cfg.basePort) : "";
+  if ($("farm-stack")) $("farm-stack").value = cfg.stack || "ipv6";
+  if ($("farm-source")) $("farm-source").value = cfg.sourceIpv6 || "";
+}
+
+function renderFarmLanes(state) {
+  const tbody = $("farm-lanes").querySelector("tbody");
+  if (!tbody) return;
+  const lanes = Array.isArray(state && state.lanes) ? state.lanes : [];
+  const ready = lanes.filter((lane) => lane.ready).length;
+  $("farm-lane-meta").textContent = lanes.length ? ready + "/" + lanes.length + " 就绪" : "-";
+  tbody.replaceChildren();
+  if (!lanes.length) {
+    const row = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 7;
+    td.textContent = tr("sidecar 未运行");
+    row.append(td);
+    tbody.append(row);
+    return;
+  }
+  for (const lane of lanes) {
+    const row = document.createElement("tr");
+    const values = [
+      "warp-f" + lane.index,
+      String(lane.port),
+      lane.egress || "-",
+      lane.rotating ? "轮换中" : lane.ready ? "就绪" : lane.error || "未就绪",
+      String(lane.dials || 0),
+      String(lane.failures || 0),
+    ];
+    values.forEach((text, i) => {
+      const td = document.createElement("td");
+      if (i === 1 || i === 2 || i === 4 || i === 5) td.className = "mono";
+      td.textContent = text;
+      row.append(td);
+    });
+    const ops = document.createElement("td");
+    const rotate = document.createElement("button");
+    rotate.type = "button";
+    rotate.className = "bw-btn";
+    rotate.textContent = "轮换";
+    rotate.dataset.farmRotate = String(lane.port);
+    const test = document.createElement("button");
+    test.type = "button";
+    test.className = "bw-btn";
+    test.textContent = "测出口";
+    test.dataset.farmTest = "warp-f" + lane.index;
+    ops.append(rotate, test);
+    row.append(ops);
+    tbody.append(row);
+  }
+}
+
+function renderFarm(state) {
+  const s = state || {};
+  const lanes = Array.isArray(s.lanes) ? s.lanes : [];
+  const ready = lanes.filter((lane) => lane.ready).length;
+  fillKv($("farm-facts"), [
+    ["状态", s.running ? "运行中" : "已停止"],
+    ["PID", s.pid ? String(s.pid) : ""],
+    ["协议栈", STACK_LABELS[s.stack] || s.stack || ""],
+    ["基端口", s.basePort != null ? String(s.basePort) : ""],
+    ["控制端口", s.controlPort != null ? String(s.controlPort) : ""],
+    ["LANE", ready + " / " + lanes.length + " 就绪"],
+    ["二进制", s.binaryAvailable ? "可用" : "未找到"],
+    ["错误", s.error || "", true],
+  ]);
+  renderFarmSettings(s.settings);
+  renderFarmLanes(s);
+  $("farm-log").textContent = farmLogText(s.log) || "未启动。";
+}
+
+async function loadFarm() {
+  try {
+    const state = await readJson(await fetch("/api/warp-farm"));
+    renderFarm(state);
+  } catch (err) {
+    showReport($("farm-report"), [line("读取 farm 状态失败：" + err.message, "bad")]);
+  }
+}
+
+async function farmAction(action, extra, okText) {
+  const buttons = $$('[data-view="warpfarm"] .toolbar button');
+  buttons.forEach((btn) => (btn.disabled = true));
+  try {
+    const body = await postJson("/api/warp-farm", Object.assign({ action: action }, extra || {}));
+    const state = body && body.status && body.status.lanes ? body.status : body;
+    if (state && Array.isArray(state.lanes)) renderFarm(state);
+    showReport($("farm-report"), [line(okText || "完成。", "ok")]);
+    if (action !== "applyPool") load();
+  } catch (err) {
+    showReport($("farm-report"), [line(err.message, "bad")]);
+    await loadFarm();
+  } finally {
+    buttons.forEach((btn) => (btn.disabled = false));
+  }
+}
+
+$("farm-start").addEventListener("click", () => farmAction("start", {}, "已请求启动。"));
+$("farm-stop").addEventListener("click", () => farmAction("stop", {}, "已停止。"));
+$("farm-restart").addEventListener("click", () => farmAction("restart", {}, "已重启。"));
+$("farm-rotate").addEventListener("click", () => farmAction("rotate", {}, "已轮换全部 lane。"));
+$("farm-apply").addEventListener("click", () => farmAction("applyPool", {}, "已把 lane 写入代理池。"));
+$("farm-refresh").addEventListener("click", loadFarm);
+
+$("farm-save").addEventListener("click", async () => {
+  const button = $("farm-save");
+  button.disabled = true;
+  try {
+    const body = await postJson("/api/warp-farm", {
+      action: "settings",
+      size: Number($("farm-size").value),
+      basePort: Number($("farm-base-port").value),
+      stack: $("farm-stack").value,
+      sourceIpv6: $("farm-source").value.trim(),
+    });
+    if (body.settings) renderFarmSettings(body.settings);
+    showReport($("farm-settings-report"), [line("参数已保存；重启后生效。", "ok")]);
+  } catch (err) {
+    showReport($("farm-settings-report"), [line(err.message, "bad")]);
+  } finally {
+    button.disabled = false;
+  }
+});
+
+document.addEventListener("click", async (event) => {
+  const rotate = event.target.closest("[data-farm-rotate]");
+  if (rotate) {
+    rotate.disabled = true;
+    try {
+      const body = await postJson("/api/warp-farm", { action: "rotate", port: Number(rotate.dataset.farmRotate) });
+      if (body.lanes) renderFarm(body);
+      showReport($("farm-lane-report"), [line("lane 已轮换。", "ok")]);
+    } catch (err) {
+      showReport($("farm-lane-report"), [line(err.message, "bad")]);
+    } finally {
+      rotate.disabled = false;
+    }
+    return;
+  }
+  const test = event.target.closest("[data-farm-test]");
+  if (test) {
+    test.disabled = true;
+    try {
+      const result = await postJson("/api/proxy/test", { testId: test.dataset.farmTest });
+      showReport($("farm-lane-report"), [
+        line(result.ok ? test.dataset.farmTest + " 正常，" + result.latencyMs + " 毫秒，出口 " + (result.exitIp || "未知") : "测试失败。", result.ok ? "ok" : "bad"),
+      ]);
+    } catch (err) {
+      showReport($("farm-lane-report"), [line(err.message, "bad")]);
+    } finally {
+      test.disabled = false;
+    }
+  }
+});
+
+// ---- 日志 ----
+let logsTimer = null;
+
+async function loadLogs() {
+  const lines = Number(($("logs-lines") && $("logs-lines").value) || 200);
+  try {
+    const data = await readJson(await fetch("/api/logs?lines=" + lines));
+    const events = (data.events || []).map((e) => new Date(e.at).toLocaleTimeString("zh-CN", { hour12: false }) + " [" + (e.level || "info") + "] " + e.line);
+    $("logs-events").textContent = events.join("\\n") || "暂无事件。";
+    $("logs-events-meta").textContent = events.length + " 行";
+    $("logs-farm").textContent = farmLogText(data.farm) || "未启动。";
+  } catch (err) {
+    $("logs-events").textContent = "读取失败：" + err.message;
+    $("logs-farm").textContent = "读取失败：" + err.message;
+  }
+}
+
+function 载入日志() {
+  loadLogs();
+  if (!logsTimer) {
+    logsTimer = setInterval(() => {
+      if (!document.hidden && currentView === "logs") loadLogs();
+    }, 3000);
+  }
+}
+
+$("logs-refresh").addEventListener("click", loadLogs);
+$("logs-lines").addEventListener("change", loadLogs);
+
+// ---- 运行配置编辑 ----
+async function loadConfigEditor() {
+  try {
+    const snap = await readJson(await fetch("/api/config"));
+    const values = snap.values || {};
+    $("cfg-default-model").value = values.defaultModel || "";
+    $("cfg-timeout").value = values.upstreamTimeoutMs != null ? String(values.upstreamTimeoutMs) : "";
+    $("cfg-maxbody").value = values.maxBodyBytes != null ? String(values.maxBodyBytes) : "";
+    $("cfg-autoupdate").value = values.autoUpdate ? "true" : "false";
+    $("cfg-model-groups").value = Object.keys(values.modelGroups || {}).length ? JSON.stringify(values.modelGroups, null, 2) : "";
+    $("cfg-file").textContent = snap.file || "";
+    if (snap.error) showReport($("cfg-report"), [line(snap.error, "bad")]);
+  } catch (err) {
+    showReport($("cfg-report"), [line("读取配置失败：" + err.message, "bad")]);
+  }
+}
+
+$("cfg-save").addEventListener("click", async () => {
+  const timeout = Number($("cfg-timeout").value);
+  const maxBody = Number($("cfg-maxbody").value);
+  if (!Number.isFinite(timeout) || !Number.isFinite(maxBody)) {
+    showReport($("cfg-report"), [line("超时与请求体上限必须是数字。", "bad")]);
+    return;
+  }
+  let groups = {};
+  const raw = $("cfg-model-groups").value.trim();
+  if (raw) {
+    try {
+      groups = JSON.parse(raw);
+    } catch (err) {
+      showReport($("cfg-report"), [line("模型组 JSON 无效：" + err.message, "bad")]);
+      return;
+    }
+  }
+  const button = $("cfg-save");
+  button.disabled = true;
+  try {
+    const body = await postJson("/api/config", {
+      defaultModel: $("cfg-default-model").value.trim(),
+      upstreamTimeoutMs: timeout,
+      maxBodyBytes: maxBody,
+      autoUpdate: $("cfg-autoupdate").value === "true",
+      modelGroups: groups,
+    });
+    showReport($("cfg-report"), [line("配置已保存并生效。", "ok")]);
+    if (body.snapshot) $("cfg-file").textContent = body.snapshot.file || "";
+    loadSettings();
+  } catch (err) {
+    showReport($("cfg-report"), [line(err.message, "bad")]);
+  } finally {
+    button.disabled = false;
+  }
+});
+
+// ---- 额度摘要 ----
+async function 载入额度() {
+  const box = $("health-quota");
+  if (!box) return;
+  try {
+    const quota = await readJson(await fetch("/api/quota"));
+    const gate = quota.gate || {};
+    fillKv(box, [
+      ["统计窗口", quota.hours + " 小时"],
+      ["请求", fmtNum(quota.total)],
+      ["429", fmtNum(quota.rate429)],
+      ["失败", fmtNum(quota.fail)],
+      ["模型冷却", quota.cooldowns + " 个"],
+      ["FARM LANE", (quota.farm && quota.farm.ready) + " / " + (quota.farm && quota.farm.lanes) + " 就绪"],
+      ["上游网关", gate.status || "-"],
+    ]);
+  } catch (err) {
+    fillKv(box, [["读取失败", err.message]]);
+  }
+}
+
 // ---- 启动 ----
 applyPrefs();
 applyLang(readLang());
@@ -2865,64 +3317,27 @@ function renderPanel(description, { version = "", port = "", authRequired = fals
     </div>
     <nav class="nav" aria-label="区块">
       <div class="nav-group">
-        <span class="nav-heading">监控</span>
         <button type="button" class="nav-item" data-go="overview" aria-current="page">
           <svg class="nav-icon" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="2.5" width="4.5" height="4.5" rx="1"/><rect x="9" y="2.5" width="4.5" height="4.5" rx="1"/><rect x="2.5" y="9" width="4.5" height="4.5" rx="1"/><rect x="9" y="9" width="4.5" height="4.5" rx="1"/></svg>
           <span>概览</span>
         </button>
-        <button type="button" class="nav-item" data-go="health">
-          <svg class="nav-icon" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1.8 8h3l1.4-2.6L8.6 11l1.5-3h4.1"/></svg>
-          <span>健康检查</span>
-        </button>
-        <button type="button" class="nav-item" data-go="diag">
-          <svg class="nav-icon" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg>
-          <span>路由诊断</span>
-        </button>
-        <button type="button" class="nav-item" data-go="events">
-          <svg class="nav-icon" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 4.5h11"/><path d="M2.5 8h11"/><path d="M2.5 11.5h7"/></svg>
-          <span>事件流</span>
-        </button>
-      </div>
-      <div class="nav-group">
-        <span class="nav-heading">出口</span>
         <button type="button" class="nav-item" data-go="egress">
           <svg class="nav-icon" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="5.5"/><path d="M2.5 8h11"/><path d="M8 2.5c-1.6 1.5-2.5 3.4-2.5 5.5s.9 4 2.5 5.5c1.6-1.5 2.5-3.4 2.5-5.5S9.6 4 8 2.5Z"/></svg>
-          <span>出口代理</span>
-        </button>
-        <button type="button" class="nav-item" data-go="pool">
-          <svg class="nav-icon" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8 2.5 5.5 2.7L8 7.9 2.5 5.2 8 2.5Z"/><path d="m2.5 8.2 5.5 2.7 5.5-2.7"/><path d="m2.5 11.2 5.5 2.7 5.5-2.7"/></svg>
-          <span>代理池</span>
+          <span>出口</span>
           <span class="nav-badge" id="nav-pool-badge" hidden></span>
         </button>
-      </div>
-      <div class="nav-group">
-        <span class="nav-heading">数据</span>
-        <button type="button" class="nav-item" data-go="stats">
+        <button type="button" class="nav-item" data-go="diagnose">
+          <svg class="nav-icon" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg>
+          <span>诊断</span>
+        </button>
+        <button type="button" class="nav-item" data-go="usage">
           <svg class="nav-icon" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M3 12.5V8.5"/><path d="M8 12.5V4.5"/><path d="M13 12.5V6.5"/></svg>
-          <span>用量统计</span>
+          <span>用量</span>
         </button>
-        <button type="button" class="nav-item" data-go="history">
-          <svg class="nav-icon" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="5.5"/><path d="M8 4.8V8l2.2 1.4"/></svg>
-          <span>请求历史</span>
-        </button>
-      </div>
-      <div class="nav-group">
-        <span class="nav-heading">工具</span>
-        <button type="button" class="nav-item" data-go="endpoint">
+        <button type="button" class="nav-item" data-go="developer">
           <svg class="nav-icon" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 2.5v3M10 2.5v3"/><path d="M4.5 5.5h7v2.2a3.5 3.5 0 0 1-7 0V5.5Z"/><path d="M8 11.2v2.3"/></svg>
-          <span>接入点</span>
+          <span>接入</span>
         </button>
-        <button type="button" class="nav-item" data-go="docs">
-          <svg class="nav-icon" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 2.5h5.2l2.8 2.8v8.2H4Z"/><path d="M9.2 2.5v2.8H12"/><path d="M6 8h4M6 10.4h3"/></svg>
-          <span>API 文档</span>
-        </button>
-        <button type="button" class="nav-item" data-go="playground">
-          <svg class="nav-icon" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.8 3.5h10.4v6.6H7.2L4.4 12.4V10.1H2.8Z"/><path d="M5.4 6h5.2M5.4 8h3.4"/></svg>
-          <span>测试台</span>
-        </button>
-      </div>
-      <div class="nav-group">
-        <span class="nav-heading">系统</span>
         <button type="button" class="nav-item" data-go="settings">
           <svg class="nav-icon" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 5h11M2.5 11h11"/><circle cx="6" cy="5" r="1.7"/><circle cx="10.3" cy="11" r="1.7"/></svg>
           <span>设置</span>
@@ -2957,7 +3372,8 @@ function renderPanel(description, { version = "", port = "", authRequired = fals
         <button type="button" id="logout"${authRequired ? "" : " hidden"}>Out</button>
       </div>
     </header>
-    <main id="main">      <section class="view is-active" data-view="overview" aria-labelledby="overview-title">
+    <main id="main">      <nav class="subnav" id="subnav" aria-label="子页面" hidden></nav>
+      <section class="view is-active" data-view="overview" aria-labelledby="overview-title">
         <div class="page-head">
           <h1 id="overview-title">概览</h1>
           <p class="page-sub">桥的出口与网关状态。改动立即用于下一个请求，无需重启。</p>
@@ -3044,6 +3460,10 @@ function renderPanel(description, { version = "", port = "", authRequired = fals
           <div class="metric-grid" id="health-facts"></div>
         </div>
         <div class="card">
+          <div class="card-head"><h2>额度（24 小时）</h2><span class="card-meta">/api/quota</span></div>
+          <div id="health-quota"><p class="hint">读取中…</p></div>
+        </div>
+        <div class="card">
           <div class="card-head"><h2>原始响应</h2><span class="card-meta">application/json</span></div>
           <pre class="code" id="health-raw">读取中…</pre>
         </div>
@@ -3086,7 +3506,7 @@ function renderPanel(description, { version = "", port = "", authRequired = fals
           </div>
         </div>
         <div class="card">
-          <div class="card-head"><h2>模型冷却</h2><span class="card-meta" id="diag-cooldown-meta">-</span></div>
+          <div class="card-head"><h2>模型冷却</h2><span class="card-meta" id="diag-cooldown-meta">-</span><button type="button" id="diag-cool-reset" style="margin-left:auto">清空冷却</button></div>
           <div class="table-wrap">
             <table class="diag-table" id="diag-cooldowns">
               <thead><tr><th scope="col">模型</th><th scope="col">冷却原因</th><th scope="col" class="num">剩余</th></tr></thead>
@@ -3107,6 +3527,30 @@ function renderPanel(description, { version = "", port = "", authRequired = fals
         </div>
         <div class="card">
           <div class="events-feed" id="events-feed" aria-live="polite" aria-label="网关事件流"></div>
+        </div>
+      </section>
+
+      <section class="view" data-view="logs" aria-labelledby="logs-title">
+        <div class="page-head">
+          <h1 id="logs-title">日志</h1>
+          <p class="page-sub">网关事件环与 WARP farm sidecar 的尾部输出，只读本机。</p>
+        </div>
+        <div class="toolbar">
+          <button type="button" class="primary" id="logs-refresh">刷新</button>
+          <label for="logs-lines" class="hint">行数</label>
+          <select id="logs-lines" aria-label="日志行数">
+            <option value="100">100</option>
+            <option value="200" selected>200</option>
+            <option value="500">500</option>
+          </select>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>网关</h2><span class="card-meta" id="logs-events-meta">-</span></div>
+          <pre class="code" id="logs-events">读取中…</pre>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>WARP farm</h2><span class="card-meta">stdout / stderr</span></div>
+          <pre class="code" id="logs-farm">读取中…</pre>
         </div>
       </section>
 
@@ -3183,6 +3627,69 @@ function renderPanel(description, { version = "", port = "", authRequired = fals
             <strong>代理池未启用</strong>
             <p>在上方填写并保存至少一条代理后，这里会显示健康状态与冷却倒计时。</p>
           </div>
+        </div>
+      </section>
+
+      <section class="view" data-view="warpfarm" aria-labelledby="warpfarm-title">
+        <div class="page-head">
+          <h1 id="warpfarm-title">WARP 农场</h1>
+          <p class="page-sub">Go sidecar 在本机开 N 条 Cloudflare WARP 隧道（userspace WireGuard，无 Docker、无 TUN），每条 lane 暴露一个 SOCKS5 出口并自动加入代理池。</p>
+        </div>
+        <div class="card">
+          <div class="toolbar">
+            <button type="button" class="primary" id="farm-start">启动</button>
+            <button type="button" id="farm-stop">停止</button>
+            <button type="button" id="farm-restart">重启</button>
+            <button type="button" id="farm-rotate">全部轮换</button>
+            <button type="button" id="farm-apply">应用到代理池</button>
+            <button type="button" id="farm-refresh">刷新</button>
+          </div>
+          <div class="report" id="farm-report" role="status" aria-live="polite" hidden></div>
+          <div id="farm-facts"><p class="hint">读取中…</p></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>参数</h2><span class="card-meta" id="farm-settings-meta">warp-farm.json</span></div>
+          <div class="integration-grid">
+            <div class="field">
+              <label for="farm-size">LANE 数量（1–32）</label>
+              <input id="farm-size" type="number" min="1" max="32" step="1" inputmode="numeric">
+            </div>
+            <div class="field">
+              <label for="farm-base-port">起始端口</label>
+              <input id="farm-base-port" type="number" min="1024" max="65000" step="1" inputmode="numeric">
+            </div>
+            <div class="field">
+              <label for="farm-stack">协议栈</label>
+              <select id="farm-stack">
+                <option value="ipv6">IPv6（每个 /64 独立）</option>
+                <option value="ipv4">IPv4</option>
+                <option value="dual">双栈</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="farm-source">IPv6 源地址（可选）</label>
+              <input id="farm-source" type="text" autocomplete="off" spellcheck="false" placeholder="2a09:...">
+            </div>
+          </div>
+          <div class="actions">
+            <button type="button" class="primary" id="farm-save">保存参数</button>
+          </div>
+          <p class="hint">参数写入状态目录的 <code>warp-farm.json</code>；重启或下次启动生效。</p>
+          <div class="report" id="farm-settings-report" role="status" aria-live="polite" hidden></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>LANE</h2><span class="card-meta" id="farm-lane-meta">-</span></div>
+          <div class="table-wrap">
+            <table class="diag-table" id="farm-lanes">
+              <thead><tr><th scope="col">LANE</th><th scope="col">端口</th><th scope="col">出口</th><th scope="col">状态</th><th scope="col" class="num">拨号</th><th scope="col" class="num">失败</th><th scope="col">动作</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <div class="report" id="farm-lane-report" role="status" aria-live="polite" hidden></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>sidecar 日志</h2><span class="card-meta">stdout / stderr</span></div>
+          <pre class="code" id="farm-log">未启动。</pre>
         </div>
       </section>
 
@@ -3504,6 +4011,43 @@ function renderPanel(description, { version = "", port = "", authRequired = fals
           <div class="card">
             <div class="card-head"><h2>运行</h2></div>
             <div id="set-runtime"><p class="hint">读取中…</p></div>
+          </div>
+          <div class="card settings-wide">
+            <div class="card-head"><h2>运行配置</h2><span class="card-meta" id="cfg-file"></span></div>
+            <div class="integration-grid">
+              <div class="field">
+                <label for="cfg-default-model">默认模型</label>
+                <input id="cfg-default-model" type="text" autocomplete="off" spellcheck="false" placeholder="留空 = 由客户端指定">
+              </div>
+              <div class="field">
+                <label for="cfg-timeout">上游超时（毫秒）</label>
+                <input id="cfg-timeout" type="number" min="1000" max="600000" step="1000" inputmode="numeric">
+              </div>
+              <div class="field">
+                <label for="cfg-maxbody">请求体上限（字节）</label>
+                <input id="cfg-maxbody" type="number" min="1024" max="104857600" step="1024" inputmode="numeric">
+              </div>
+              <div class="field">
+                <label for="cfg-autoupdate">自动更新</label>
+                <select id="cfg-autoupdate">
+                  <option value="true">开启</option>
+                  <option value="false">关闭</option>
+                </select>
+              </div>
+            </div>
+            <div class="field">
+              <label for="cfg-model-groups">模型组（JSON：别名 → 模型数组）</label>
+              <textarea id="cfg-model-groups" rows="6" spellcheck="false" placeholder="{&quot;cepat&quot;: [&quot;mimo-v2.6-flash-free&quot;]}"></textarea>
+            </div>
+            <div class="actions">
+              <button type="button" class="primary" id="cfg-save">保存配置</button>
+            </div>
+            <p class="hint">写入 <code>config.json</code>，下一次请求生效；环境变量优先级更高时 source 显示为 env。</p>
+            <div class="report" id="cfg-report" role="status" aria-live="polite" hidden></div>
+          </div>
+          <div class="card">
+            <div class="card-head"><h2>身份</h2><span class="card-meta" id="ident-mode">-</span></div>
+            <div id="ident-body"><p class="hint">读取中…</p></div>
           </div>
           <div class="card">
             <div class="card-head"><h2>出口</h2></div>

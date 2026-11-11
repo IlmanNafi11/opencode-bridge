@@ -770,6 +770,14 @@ describe("identity: session id prefix", () => {
     const id = identity.createSessionId(true);
     assert.match(id, /^sess_[0-9a-f]{12}[0-9A-Za-z]{14}$/);
   });
+
+  it("createProjectId mints a sha1-shaped hex id that changes each call", () => {
+    const a = identity.createProjectId();
+    const b = identity.createProjectId();
+    assert.match(a, /^[0-9a-f]{40}$/);
+    assert.match(b, /^[0-9a-f]{40}$/);
+    assert.notEqual(a, b);
+  });
 });
 
 describe("identity: tool profile formatting", () => {

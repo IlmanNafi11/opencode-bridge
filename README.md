@@ -66,16 +66,16 @@ step) with a matching `.sha256` file:
 
 | Platform | Archive |
 | --- | --- |
-| Linux x86_64 | `fucking-opencode_v0.1.2_linux_amd64.tar.gz` |
-| Linux arm64 | `fucking-opencode_v0.1.2_linux_arm64.tar.gz` |
-| macOS Intel | `fucking-opencode_v0.1.2_darwin_amd64.tar.gz` |
-| macOS Apple silicon | `fucking-opencode_v0.1.2_darwin_arm64.tar.gz` |
-| Windows x86_64 | `fucking-opencode_v0.1.2_windows_amd64.zip` |
-| Windows arm64 | `fucking-opencode_v0.1.2_windows_arm64.zip` |
+| Linux x86_64 | `fucking-opencode_v0.1.3_linux_amd64.tar.gz` |
+| Linux arm64 | `fucking-opencode_v0.1.3_linux_arm64.tar.gz` |
+| macOS Intel | `fucking-opencode_v0.1.3_darwin_amd64.tar.gz` |
+| macOS Apple silicon | `fucking-opencode_v0.1.3_darwin_arm64.tar.gz` |
+| Windows x86_64 | `fucking-opencode_v0.1.3_windows_amd64.zip` |
+| Windows arm64 | `fucking-opencode_v0.1.3_windows_arm64.zip` |
 
 ```bash
-tar -xzf fucking-opencode_v0.1.2_linux_amd64.tar.gz
-cd fucking-opencode-0.1.2
+tar -xzf fucking-opencode_v0.1.3_linux_amd64.tar.gz
+cd fucking-opencode-0.1.3
 ./fucking-opencode          # or: bun server.js
 ```
 
@@ -253,6 +253,55 @@ Without the binary the card reports `available: false`. Containers normally
 cannot reach the host's WARP daemon; run the gateway on the host or leave the
 feature disabled.
 
+### WARP farm without Docker (Go sidecar)
+
+`warp-farm/` is a small Go program that registers N Cloudflare WARP devices,
+runs one userspace WireGuard tunnel per device (UDP packets, no TUN, no
+Docker), and exposes one SOCKS5 listener per exit on `127.0.0.1:40001..`.
+The gateway spawns it and registers the lanes in the existing proxy pool, so
+health checks, cooldowns, and the panel need no special case.
+
+```bash
+cd warp-farm && go build -o warp-farm.exe .   # once per machine
+WARP_FARM=1 bun server.js                     # gateway starts the sidecar
+```
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `WARP_FARM` | `0` | `1` starts the sidecar at boot and applies it to the pool |
+| `WARP_FARM_SIZE` | `8` | Number of exits / SOCKS5 ports |
+| `WARP_FARM_BASE_PORT` | `40001` | First SOCKS5 port |
+| `WARP_FARM_STACK` | `ipv6` | `ipv6` (unique `/64` egress), `ipv4` (shared NAT), or `dual` |
+| `WARP_FARM_SOURCE_IPV6` | — | Optional outer `/64` prefix each exit binds from (Linux needs `IPV6_FREEBIND`) |
+| `WARP_FARM_BIN` | `warp-farm/warp-farm[.exe]` | Explicit binary path |
+| `WARP_FARM_START_TIMEOUT_MS` | `90000` | How long boot waits for the first ready lane |
+
+`GET|POST /api/warp-farm` reports the process, lanes, egress addresses, dial
+counters, saved parameters, and the last log lines. POST actions: `start`
+(`size`, `basePort`, `stack`, `sourceIpv6`), `stop`, `rotate` (`port`, omit for
+all lanes), `restart`, `applyPool`, and `settings` (persists the same fields to
+`<state>/warp-farm.json`, which `start` uses when the env leaves them unset).
+All actions use the same admin guard as `/api/proxy`.
+
+When a lane answers `429`/quota or fails at the transport layer, the gateway
+asks the farm to retire that exit and swap in a new registration on the same
+port (debounced to one rotation per lane per minute). A new registration has a
+new WireGuard key and IPv6 egress, so the per-ID quota bucket starts empty.
+`-stack ipv6` is the default for that reason; the shared IPv4 WARP address is
+almost always already exhausted.
+
+The panel exposes the farm as the **WARP Farm** tab under **Egress**
+(start/stop/restart, per-lane rotate and egress test, saved parameters, sidecar
+log), with gateway and sidecar tails in the **Log** tab under **Diagnostics**,
+the runtime-config editor and identity card under **Settings**, the 24-hour
+quota card under **Overview**, and the model-cooldown reset under
+**Route diagnostics**. The sidebar itself is six groups — Overview, Egress,
+Diagnostics, Usage, Developer, Settings — with the former pages as sub-tabs.
+
+This directory is derived from GPL-3.0 code and is licensed GPL-3.0-or-later
+(see `warp-farm/NOTICE.md`). It talks to the gateway only over SOCKS5 and HTTP;
+no GPL code is linked into `server.js`.
+
 </details>
 
 <details>
@@ -272,6 +321,11 @@ feature disabled.
 | `GET/POST /api/settings` | — | Read masked credentials; update API key or panel password |
 | `GET/POST /api/proxy` | — | Read or update egress; `toggle` enables or disables one pool entry, `coolClear` clears one entry's cooldown (or `"*"` for all) |
 | `POST /api/proxy/test` | — | Probe a candidate proxy and report the exit IP; `testId` probes one pool entry by id |
+| `GET/POST /api/warp-farm` | — | Go WARP sidecar status; POST `start`, `stop`, `rotate`, `restart`, `applyPool`, `settings` |
+| `GET /api/logs` | — | Gateway event ring plus sidecar stdout/stderr tails (`?lines=`) |
+| `GET/POST /api/config` | — | Read or rewrite `config.json` (`defaultModel`, timeouts, `modelGroups`, …); invalid values are rejected whole |
+| `POST /api/model-health/reset` | — | Clear all model cooldowns |
+| `GET /api/quota` | — | 24-hour `429`/failure totals, cooldown count, farm lane readiness |
 | `GET /api/stats` | — | Totals, model/provider/client/key breakdowns, 24-bucket series, P50/P95/P99, TTFT average |
 | `GET /api/history` | — | Request history with range filters |
 | `GET /api/events` | — | Gateway log ring tail from `?after=<sequence>` |

@@ -17,3 +17,7 @@ bridge-out.log
 bridge-out-err.log
 
 dist/
+
+# Go sidecar build output (built per machine: cd warp-farm && go build)
+warp-farm/warp-farm
+warp-farm/warp-farm.exe

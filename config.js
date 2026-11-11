@@ -202,10 +202,42 @@ function __reload() {
   return 快照();
 }
 
+/** 合并写入 config.json（原子重命名，0600）；未知键忽略，非法值整体拒绝。 */
+function 写入(patch) {
+  if (!patch || typeof patch !== "object" || Array.isArray(patch)) {
+    return { ok: false, error: "配置必须是 JSON 对象。" };
+  }
+  let 原始 = {};
+  try {
+    原始 = JSON.parse(fs.readFileSync(配置文件路径(), "utf8"));
+    if (!原始 || typeof 原始 !== "object" || Array.isArray(原始)) 原始 = {};
+  } catch {}
+  for (const [键, 值] of Object.entries(patch)) {
+    if (键 in 默认值) 原始[键] = 值;
+  }
+  const { 问题 } = 校验(原始);
+  if (问题.length) return { ok: false, error: 问题.join(" ") };
+  const 文件 = 配置文件路径();
+  const 临时 = `${文件}.tmp.${process.pid}`;
+  try {
+    fs.mkdirSync(path.dirname(文件), { recursive: true });
+    fs.writeFileSync(临时, JSON.stringify(原始, null, 2), { mode: 0o600 });
+    fs.renameSync(临时, 文件);
+  } catch (err) {
+    try {
+      fs.unlinkSync(临时);
+    } catch {}
+    return { ok: false, error: `写入 config.json 失败：${err.message}` };
+  }
+  __reload();
+  return { ok: true, snapshot: 快照() };
+}
+
 module.exports = {
   配置文件路径,
   取,
   快照,
+  写入,
   __reload,
   默认值,
 };

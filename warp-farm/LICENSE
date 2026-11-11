@@ -1,0 +1,29 @@
+warp-farm — WARP exits as local SOCKS5 ports
+============================================
+
+SPDX-License-Identifier: GPL-3.0-or-later
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation, either version 3 of the License, or (at your option) any later
+version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT
+ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
+The full license text is at https://www.gnu.org/licenses/gpl-3.0.txt. See
+NOTICE.md for attribution.
+
+Build:
+
+    go build -o warp-farm.exe .      # Windows
+    go build -o warp-farm .          # Linux/macOS
+
+Run:
+
+    ./warp-farm.exe -size 8 -stack ipv6
+    ./warp-farm.exe -size 8 -stack ipv6 -source-ipv6 2001:db8:1:2::/64
+
+The gateway starts it for you when `WARP_FARM=1`; the checked-in binary is
+ignored by git, so build it once per machine.

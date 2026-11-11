@@ -116,4 +116,12 @@ function __reload() {
   缓存 = null;
 }
 
-module.exports = { 候选, 组成员, 记录失败, 记录成功, 诊断, 健康文件, __reload };
+/** 清空全部模型冷却（面板按钮）；返回被清除的条目数由 诊断 前后对比得出。 */
+function 重置() {
+  const 之前 = 诊断().length;
+  写入({});
+  缓存 = null;
+  return { ok: true, cleared: 之前 };
+}
+
+module.exports = { 候选, 组成员, 记录失败, 记录成功, 诊断, 重置, 健康文件, __reload };

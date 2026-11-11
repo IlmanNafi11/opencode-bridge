@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.1.3] — 2026-11-11
+
+- `warp-farm/` — Go sidecar (no Docker, no TUN): N WARP registrations, one
+  userspace WireGuard tunnel each, one loopback SOCKS5 listener per exit
+  (`40001..`). `warp-farm.js` spawns it, waits for the control API, and
+  registers the lanes in the existing proxy pool. `WARP_FARM=1` starts it at
+  boot; `GET|POST /api/warp-farm` reports and controls it. A lane that answers
+  `429`/quota or fails at the transport layer is rotated on the same port.
+- Identity: `x-opencode-project` now defaults to a fresh sha1-shaped id per
+  request (`OPENCODE_PROJECT_MODE=derived` restores the CLI-faithful value),
+  and 5xx/gate retries rotate the project id as well as the session id. The
+  free tier accounts quota per (project id, egress), so a new id is a new
+  bucket.
+- `warp-farm/NOTICE.md` records the GPL-3.0/MIT provenance of the Go sidecar.
+- Panel: new **WARP Farm** menu (start/stop/restart, per-lane rotate and
+  egress test, parameters persisted to `<state>/warp-farm.json`, sidecar log),
+  a **Log** menu combining the gateway event ring and sidecar tails
+  (`GET /api/logs`), a runtime-config editor backed by `POST /api/config`,
+  an identity card showing `OPENCODE_PROJECT_MODE`, a 24-hour quota card
+  (`GET /api/quota`), and a model-cooldown reset button
+  (`POST /api/model-health/reset`).
+- Panel navigation collapsed from 14 flat menus to 6 groups (Overview,
+  Egress, Diagnostics, Usage, Developer, Settings); the former pages are now
+  sub-tabs inside their group, and hash deep links such as `#warpfarm` or
+  `#pool` still open the right group and tab. Every new string is translated
+  for `zh`/`id`/`en`; composite status text (`2 / 2 就绪`, `24 小时`,
+  `已清空 N 条模型冷却。`, `warp-f2 正常，123 毫秒，出口 1.2.3.4`) is handled by
+  pattern rules so switching language re-renders it.
+
 ## [0.1.2] — 2026-11-11
 
 Multi-key credentials, an optional admin port, and a movable usage ledger.

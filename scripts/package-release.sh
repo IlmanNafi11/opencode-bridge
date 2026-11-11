@@ -11,7 +11,7 @@ STAGE="$OUT/$NAME-$VERSION"
 
 FILES=(
   server.js identity.js token-budget.js compat.js proxy.js panel.js panel-settings.js
-  config.js model-groups.js socks-bridge.js warp.js
+  config.js model-groups.js socks-bridge.js warp.js warp-farm.js
   stats.js egress-proxy.js transport-fingerprint.js transport-baseline.json
   verify.js gate-drill.js install.sh tunnel-doctor.sh package.json
   README.md CHANGELOG.md LICENSE THIRD_PARTY_NOTICES.md panel-avatar.png
@@ -22,6 +22,12 @@ mkdir -p "$STAGE"
 
 for f in "${FILES[@]}"; do
   [ -e "$ROOT/$f" ] && cp "$ROOT/$f" "$STAGE/"
+done
+
+# WARP farm sidecar：只带源码与模块文件；二进制按平台在本机构建。
+mkdir -p "$STAGE/warp-farm"
+for f in "$ROOT"/warp-farm/*.go "$ROOT"/warp-farm/go.mod "$ROOT"/warp-farm/go.sum "$ROOT"/warp-farm/LICENSE "$ROOT"/warp-farm/NOTICE.md; do
+  [ -e "$f" ] && cp "$f" "$STAGE/warp-farm/"
 done
 
 cat > "$STAGE/fucking-opencode" <<'LAUNCH'
