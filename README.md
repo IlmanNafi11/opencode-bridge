@@ -2,7 +2,7 @@
   <img src="panel-avatar.png" alt="Fucking Opencode" width="160">
 </p>
 
-<h1 align="center">Fucking Opencode 0.1.2</h1>
+<h1 align="center">Fucking Opencode</h1>
 
 <p align="center">
   OpenAI-, Anthropic-, and Responses-compatible gateway for OpenCode free-tier models,<br>
@@ -10,7 +10,6 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.1.2-blue" alt="Version 0.1.2">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="MIT license"></a>
   <img src="https://img.shields.io/badge/runtime-Bun-black" alt="Bun runtime">
   <img src="https://img.shields.io/badge/dependencies-0-informational" alt="Zero dependencies">
