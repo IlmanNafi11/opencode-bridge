@@ -129,7 +129,9 @@ in `settings.json`.
   API docs, playground, and settings. Chinese, Indonesian, and English.
 - Editable credentials — API key and panel password stored in
   `~/.fucking-opencode/settings.json` with mode `0600`.
-- Optional self-update from this repository every six hours.
+- Optional self-update from this repository every six hours. Updates ship the
+  panel/admin modules plus the WARP sidecar sources; when Go is on `PATH`, the
+  sidecar binary is rebuilt before the gateway restarts.
 
 </details>
 
@@ -154,10 +156,10 @@ PORT=20140 bash install.sh      # install alongside an existing gateway
 ```
 
 From a checkout, `bash install.sh` installs the working tree, including
-uncommitted files. `SOURCE=remote bash install.sh` forces a download. With `go`
-on `PATH`, a checkout install also builds the `warp-farm` sidecar into
-`<BINDIR>/warp-farm/warp-farm`; without Go the gateway installs normally and
-only WARP farm stays unavailable.
+uncommitted files. `SOURCE=remote bash install.sh` forces a download. Remote
+installs now fetch the `warp-farm` Go sources as well. With `go` on `PATH`, the
+installer builds the `warp-farm` sidecar into `<BINDIR>/warp-farm/warp-farm`;
+without Go the gateway installs normally and only WARP farm stays unavailable.
 
 ### Docker
 
@@ -241,6 +243,9 @@ docker run -d --name fucking-opencode \
 | `REASONING_EFFORT` | *(empty)* | Default `reasoning_effort` when the client omits it (`none`…`max`) |
 | `REASONING_EFFORT_BY_MODEL` | *(empty)* | JSON object of model → level, overriding `REASONING_EFFORT` per model |
 | `PANEL_TLS_CERT` / `PANEL_TLS_KEY` | *(unset)* | Serve panel, API, and inference over HTTPS on both listeners when both are set |
+| `NOTIFY_WEBHOOK_URL` | *(unset)* | Discord/Telegram/generic webhook for incident alerts (deduped 5 min, max 10/min) |
+| `NOTIFY_TELEGRAM_CHAT_ID` | *(unset)* | Chat id required when the webhook URL is a Telegram bot endpoint |
+| `FUCKING_OPENCODE_MODEL_GROUP_WEIGHTS` | *(unset)* | JSON alias → model → weight (1..100); overrides `modelGroupWeights` in `config.json` |
 
 Changing a credential or proxy in the panel applies immediately. Other
 environment changes require a restart.
@@ -263,6 +268,41 @@ are skipped by later requests until the cooldown expires.
 counts, `429`/`5xx` totals, the current success streak, active model
 cooldowns, and the last gateway rejection. The panel's Routing Diagnostics
 view renders it alongside pool health.
+
+### Observability, ops, and diagnostics (0.1.6)
+
+The panel gained a request-trace view (waterfall, in-flight, per-exit
+scoreboard), model health with alias test, a combined health score and incident
+banner, log filtering/pause/download, a usage error/429 card, payload/anchor
+inspection, a self-test runner, safe mode, scheduled maintenance, config
+snapshots with rollback, a model-group editor, key usage/top consumers, and a
+redacted diagnostic bundle. All of it is read-mostly admin JSON guarded by the
+panel session; write endpoints also require loopback `Host`/`Origin` and
+`application/json`:
+
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /api/observability` | Ring buffer of requests, in-flight, exit scoreboard, incidents, health score |
+| `POST /api/observability/clear` | Clear request traces (incidents/history kept) |
+| `GET /api/models` | Online models, group candidates, catalog verdicts, cooldowns |
+| `POST /api/models/test` | Resolve one group alias (or report a single model's verdict) |
+| `GET /api/diag/payload` | Recorded upstream request shapes and gate anchors |
+| `GET /api/diagnostics/bundle` | ZIP with redacted health/config/pool/farm/usage/events |
+| `GET /api/selftest` · `POST /api/selftest` | Run `verify --quick`, `transport-fingerprint --check`, `gate-drill` |
+| `GET /api/ops` | Safe mode, maintenance schedule, webhook status |
+| `POST /api/ops/safe-mode` | Pin one lane and stop rotation for N minutes (auto-off) |
+| `POST /api/ops/maintenance` | Persisted maintenance window (`intervalHours`, quiet `HH:MM`, abuse reactions) |
+| `POST /api/ops/webhook-test` | Send one test notification |
+| `GET /api/keys/usage` | Per-key minute/day usage and 24 h top consumers |
+| `GET /api/sessions` | Session affinity and the egress each session last used |
+| `POST /api/farm/probe` · `POST /api/farm/rotate` | Probe one WARP lane's exit or rotate it |
+| `POST /api/backup/preview` | Diff a backup against the current state before restoring |
+
+Safe mode only counts while enabled (`ops.生效()` gates both flags). Maintenance
+runs at most once per `intervalHours` and only while no request is in flight;
+quiet hours and per-incident abuse reactions are honored. Incidents persist in
+`<state>/incidents.json` (mode 0600) and are the only observability data that
+survives a restart.
 
 ### Cloudflare WARP (optional)
 
@@ -360,6 +400,17 @@ no GPL code is linked into `server.js`.
 | `GET /api/history` | — | Request history with range filters |
 | `GET /api/events` | — | Gateway log ring tail from `?after=<sequence>` |
 | `GET/POST /api/backup` | — | Export or restore `settings.json`, `proxy.json`, `warp-farm.json`, `model-health.json`, `config.json` (panel session required) |
+| `GET/POST /api/audit` | — | Read the admin audit log (`?limit=`) or clear it with `{"clear":true}` |
+| `GET/POST /api/retention` | — | Read or update retention (`usageDays`, `maxUsageMb`, `auditDays`, `backupKeep`) |
+| `POST /api/retention/run` | — | Prune now (skipped while retention is disabled) |
+| `GET/POST /api/backups` | — | List snapshots, save schedule settings, or create one with `{"create":true}` |
+| `POST /api/backups/restore` | — | Restore a listed snapshot by `{"name":"backup-…json"}` |
+| `GET/POST /api/autoheal` | — | Read auto-heal state or update its settings |
+| `POST /api/autoheal/run` | — | Run one auto-heal round (still honours `intervalSec`) |
+| `GET/POST /api/notify` | — | Read masked notification targets or save routing (`targets`, `quietFrom`, `quietTo`, `perMinute`, `retryMax`) |
+| `POST /api/notify/test` | — | Send a test notification to one target (`targetId`) or the first enabled target |
+| `GET /api/models/simulate?model=` | — | Preview which model a group alias resolves to, including cooldowns |
+| `POST /api/farm/resize` | — | Resize the WARP farm to `{"size":N}` (1..32) and restart it when running |
 
 ### Connect anything
 
@@ -517,6 +568,14 @@ protocol, stream flag, status, tokens (input, cached, output), duration, the
 first-token time for streamed calls (`ttft_ms`), the egress label, plus the
 provider, client address, and API-key label (`default` / `none`). Message
 content is never stored.
+
+Admin actions append to `<state dir>/audit.jsonl` (mode `0600`, rotated to
+`audit.jsonl.1` at 2 MiB) with sensitive keys redacted. Retention settings live
+in `<state dir>/retention.json` (disabled by default) and prune `usage.jsonl`,
+the audit log, and old snapshots. Scheduled snapshots are written to
+`<state dir>/backups/backup-<iso>.json`; restore only accepts names returned by
+the list endpoint. Auto-heal state lives in `<state dir>/autoheal.json` and
+notification routing in `<state dir>/notify.json` (both `0600`).
 
 The Usage view aggregates that file: totals, a 24-bucket series with a
 per-bucket request count, faceted breakdowns by model, provider, client, and

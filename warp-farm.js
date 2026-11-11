@@ -183,11 +183,16 @@ function 应用到池(status = 状态缓存) {
     if (until <= now) 出口块冷却.delete(块);
   }
 
-  const usable = lanes.filter((lane) => {
+  let usable = lanes.filter((lane) => {
+    if (!lane.ready) return false;
     const 块 = 出口块(lane.egress);
     if (!块) return true;
     return (出口块冷却.get(块) || 0) <= now;
   });
+  // 绝不能因为"所有 /64 都在冷却"就把唯一出口删掉：池变空后 proxy 会回落到
+  // 本机直连，那正是会触发 IP 级 abuse 的路径。宁可继续用 WARP lane 让它
+  // 快速失败/重试，也不要把宿主机 IP 暴给上游。
+  if (usable.length === 0) usable = lanes.filter((lane) => lane.ready);
   if (usable.length === 0) {
     const proxy = require("./proxy");
     if (proxy.getPool().some((entry) => String(entry.id || "").startsWith("warp-f"))) {
@@ -208,7 +213,12 @@ function 应用到池(status = 状态缓存) {
     .getPool()
     .filter((entry) => !String(entry.id || "").startsWith("warp-f"));
   const signature = entries.map((e) => `${e.id}|${e.url}`).join(",");
-  if (signature === 上次池签名) {
+  const current = proxy
+    .getPool()
+    .filter((entry) => String(entry.id || "").startsWith("warp-f"))
+    .map((entry) => `${entry.id}|${entry.url}`)
+    .join(",");
+  if (signature === 上次池签名 && signature === current) {
     return { ok: true, unchanged: true, entries: entries.length + existing.length };
   }
   proxy.setPool({ entries: [...existing, ...entries], strategy: "round-robin" });
@@ -456,7 +466,13 @@ async function 轮换(port = null) {
     const body = await res.json().catch(() => ({}));
     if (!res.ok) return { ok: false, error: body.error || `HTTP ${res.status}` };
     状态缓存 = { ...状态缓存, lanes: body.lanes || 状态缓存.lanes };
-    return { ok: true, ...body };
+    let applied = null;
+    try {
+      applied = 应用到池(状态缓存);
+    } catch (err) {
+      applied = { ok: false, error: err.message };
+    }
+    return { ok: true, ...body, applied };
   } catch (err) {
     return { ok: false, error: err.message };
   }
@@ -502,6 +518,7 @@ function 状态() {
     ...状态缓存,
     settings: 读设置(),
     binaryAvailable: Boolean(状态缓存.binary || 找二进制()),
+    coolingBlocks: [...出口块冷却].map(([block, until]) => ({ block, until })),
     log: 日志环.slice(-20),
   };
 }
@@ -516,6 +533,16 @@ async function 重启动(options = {}) {
   }
   await 停止();
   return 启动({ ...保存, ...options });
+}
+
+/** 调整 lane 数量：未运行时只保存，运行中则按新尺寸重启。 */
+async function 调整规模(size) {
+  const n = Number(size);
+  if (!Number.isInteger(n) || n < 1 || n > 32) return { ok: false, error: "size 必须是 1..32 的整数。" };
+  if (子进程 && !子进程.killed) return 重启动({ size: n });
+  const saved = 保存设置({ size: n });
+  if (!saved.ok) return saved;
+  return { ok: true, running: false, settings: saved.settings };
 }
 
 /** 供 /api/logs 使用的 sidecar 原始日志（stdout/stderr）。 */
@@ -548,6 +575,8 @@ module.exports = {
   autoStart: 自动启动,
   settings: 读设置,
   saveSettings: 保存设置,
+  调整规模,
+  调整大小: 调整规模,
   log: 日志,
   binaryPath: 找二进制,
   poolEntries: 合成池条目,

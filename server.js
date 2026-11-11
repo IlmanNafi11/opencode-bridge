@@ -111,7 +111,35 @@ const WARP_FARM_FALLBACK = {
   日志: () => [],
 };
 const warpFarm = 加载本地模块("warp-farm", WARP_FARM_FALLBACK);
+const 观测 = require("./observability");
+const 通知 = require("./notify");
+const 诊断包 = require("./diagnostics");
+const 自检 = require("./selftest");
+const 运维 = require("./ops");
+const dashboardApi = require("./dashboard-api");
+const 审计 = 加载本地模块("audit", { 记录: () => null, 读取: () => [], 清理: () => ({ ok: true, removed: 0 }), 统计: () => ({ count: 0, size: 0 }) });
+const 保留 = 加载本地模块("retention", {
+  状态: () => ({ enabled: false }),
+  保存: () => ({ ok: false, error: "retention.js 未安装" }),
+  执行: () => ({ ok: false, error: "retention.js 未安装" }),
+  节拍: () => ({ ok: true, skipped: "missing" }),
+});
+const 备份 = 加载本地模块("backup", {
+  状态: () => ({ enabled: false, count: 0 }),
+  保存: () => ({ ok: false, error: "backup.js 未安装" }),
+  创建: () => ({ ok: false, error: "backup.js 未安装" }),
+  列表: () => [],
+  恢复: () => ({ ok: false, error: "backup.js 未安装" }),
+  节拍: () => ({ ok: true, skipped: "missing" }),
+  白名单: [],
+});
+const 自愈 = 加载本地模块("autoheal", {
+  快照: () => ({ enabled: false, history: [] }),
+  保存: () => ({ ok: false, error: "autoheal.js 未安装" }),
+  节拍: async () => ({ ok: true, skipped: "missing" }),
+});
 const WARP轮换间隔 = new Map();
+const WARP_FARM_ENABLED = /^(1|true|yes)$/i.test(String(process.env.WARP_FARM || ""));
 
 /**
  * 本服务按相对路径 require 的本地模块。自更新器用它拒绝会装出
@@ -149,7 +177,7 @@ async function repairMissingModules(dir = __dirname) {
   const fs = require("fs");
   const path = require("path");
   const required = new Set(本地require(fs.readFileSync(path.join(dir, "server.js"), "utf8")));
-  for (const name of ["proxy.js", "panel.js", "config.js", "model-groups.js", "socks-bridge.js", "warp.js", "compat.js"]) required.add(name);
+  for (const name of ["proxy.js", "panel.js", "config.js", "model-groups.js", "socks-bridge.js", "warp.js", "compat.js", "observability.js", "notify.js", "diagnostics.js", "selftest.js", "ops.js", "dashboard-api.js", "audit.js", "autoheal.js", "backup.js", "retention.js"]) required.add(name);
   const missing = [...required].filter((f) => !fs.existsSync(path.join(dir, f)));
   const repaired = [];
   const failed = [];
@@ -294,7 +322,7 @@ function 推理强度(targetModel) {
   return 指定 || undefined;
 }
 /** 接口密钥检查：返回 null（通过）或 401 响应体。 */
-function 检查API密钥(req) {
+function 检查API密钥(req, res) {
   // 协议兼容路由的内部自调用已在入口校验过；不再重复计费或计限额。
   if (是内部调用(req)) return null;
   if (!panelSettings.hasApiKeys()) {
@@ -314,8 +342,8 @@ function 检查API密钥(req) {
   if (!matched) return { error: { message: "API key 无效", type: "authentication_error", code: "invalid_api_key" } };
   req.__apiKeyLabel = matched.label;
   req.__apiKeyModels = Array.isArray(matched.models) ? matched.models : null;
-  const 超限 = 检查密钥额度(matched);
-  if (超限) return { error: 超限.error, __status: 超限.status, __retryAfter: 超限.retryAfter };
+  const 超限 = 检查密钥额度(matched, res);
+  if (超限) return { error: 超限.error, __status: 超限.status, __retryAfter: 超限.retryAfter, __headers: 超限.headers };
   return null;
 }
 /** 入站客户端地址：去掉 IPv6-mapped 前缀；只用于本机分面统计。 */
@@ -417,16 +445,18 @@ function 挂接并发释放(res, release) {
 
 // --- 下游 key 额度与模型白名单 ---
 // 条目字段：rpm（每分钟请求数，0 = 不限）、daily（24 小时请求数，0 = 不限）、
+// burst（10 秒窗口请求数，0 = 不限）、concurrency（同时在途，0 = 不限）、
 // models（允许的模型 id 列表，空 = 全放行）。计数只存在内存里，重启归零。
 const 密钥计数 = new Map();
 const 分钟窗口毫秒 = 60 * 1000;
 const 日窗口毫秒 = 24 * 60 * 60 * 1000;
+const 突发窗口毫秒 = 10 * 1000;
 
 function 取密钥计数(label) {
   const now = Date.now();
   let entry = 密钥计数.get(label);
   if (!entry) {
-    entry = { 分钟起点: now, 分钟次数: 0, 日起点: now, 日次数: 0 };
+    entry = { 分钟起点: now, 分钟次数: 0, 日起点: now, 日次数: 0, 突发起点: now, 突发次数: 0, 并发: 0 };
     密钥计数.set(label, entry);
   }
   if (now - entry.分钟起点 >= 分钟窗口毫秒) {
@@ -437,22 +467,46 @@ function 取密钥计数(label) {
     entry.日起点 = now;
     entry.日次数 = 0;
   }
+  if (now - entry.突发起点 >= 突发窗口毫秒) {
+    entry.突发起点 = now;
+    entry.突发次数 = 0;
+  }
   return entry;
 }
 
-/** 记一次请求并检查限额；超限返回 { status, error, retryAfter }。 */
-function 检查密钥额度(matched) {
+/** 记一次请求并检查限额；超限返回 { status, error, retryAfter, headers }。 */
+function 检查密钥额度(matched, res) {
   const rpm = Number(matched?.rpm) || 0;
   const daily = Number(matched?.daily) || 0;
-  if (!rpm && !daily) return null;
+  const burst = Number(matched?.burst) || 0;
+  const concurrency = Number(matched?.concurrency) || 0;
+  if (!rpm && !daily && !burst && !concurrency) return null;
   const entry = 取密钥计数(matched.label);
   entry.分钟次数 += 1;
   entry.日次数 += 1;
+  entry.突发次数 += 1;
   const now = Date.now();
+  const 头部 = () => ({
+    "X-RateLimit-Limit": String(rpm || burst || daily || 0),
+    "X-RateLimit-Remaining": String(Math.max(0, (rpm || burst || daily || 0) - Math.max(entry.分钟次数, entry.突发次数, entry.日次数))),
+  });
+  if (burst && entry.突发次数 > burst) {
+    return {
+      status: 429,
+      retryAfter: Math.max(1, Math.ceil((entry.突发起点 + 突发窗口毫秒 - now) / 1000)),
+      headers: { ...头部(), "Retry-After": String(Math.max(1, Math.ceil((entry.突发起点 + 突发窗口毫秒 - now) / 1000))) },
+      error: {
+        message: `API key「${matched.label}」超出每 10 秒 ${burst} 次突发限制。`,
+        type: "rate_limit_error",
+        code: "key_burst_limited",
+      },
+    };
+  }
   if (rpm && entry.分钟次数 > rpm) {
     return {
       status: 429,
       retryAfter: Math.max(1, Math.ceil((entry.分钟起点 + 分钟窗口毫秒 - now) / 1000)),
+      headers: { ...头部(), "Retry-After": String(Math.max(1, Math.ceil((entry.分钟起点 + 分钟窗口毫秒 - now) / 1000))) },
       error: {
         message: `API key「${matched.label}」超出每分钟 ${rpm} 次限制。`,
         type: "rate_limit_error",
@@ -464,12 +518,37 @@ function 检查密钥额度(matched) {
     return {
       status: 429,
       retryAfter: Math.max(1, Math.ceil((entry.日起点 + 日窗口毫秒 - now) / 1000)),
+      headers: { ...头部(), "Retry-After": String(Math.max(1, Math.ceil((entry.日起点 + 日窗口毫秒 - now) / 1000))) },
       error: {
         message: `API key「${matched.label}」超出 24 小时 ${daily} 次限制。`,
         type: "rate_limit_error",
         code: "key_quota_exceeded",
       },
     };
+  }
+  if (concurrency && entry.并发 >= concurrency) {
+    return {
+      status: 429,
+      retryAfter: 1,
+      headers: { ...头部(), "Retry-After": "1" },
+      error: {
+        message: `API key「${matched.label}」同时最多 ${concurrency} 个在途请求。`,
+        type: "rate_limit_error",
+        code: "key_concurrency_limited",
+      },
+    };
+  }
+  if (concurrency && res) {
+    entry.并发 += 1;
+    let released = false;
+    const 释放 = () => {
+      if (released) return;
+      released = true;
+      const current = 密钥计数.get(matched.label);
+      if (current) current.并发 = Math.max(0, current.并发 - 1);
+    };
+    res.once("finish", 释放);
+    res.once("close", 释放);
   }
   return null;
 }
@@ -810,8 +889,30 @@ const UPDATE_FILES = [
   "model-groups.js",
   "socks-bridge.js",
   "warp.js",
+  "warp-farm.js",
+  "warp-farm/main.go",
+  "warp-farm/bind.go",
+  "warp-farm/exit.go",
+  "warp-farm/freebind_linux.go",
+  "warp-farm/freebind_other.go",
+  "warp-farm/registrar.go",
+  "warp-farm/socks5.go",
+  "warp-farm/go.mod",
+  "warp-farm/go.sum",
+  "warp-farm/LICENSE",
+  "warp-farm/NOTICE.md",
   "stats.js",
   "egress-proxy.js",
+  "audit.js",
+  "autoheal.js",
+  "backup.js",
+  "dashboard-api.js",
+  "diagnostics.js",
+  "notify.js",
+  "observability.js",
+  "ops.js",
+  "retention.js",
+  "selftest.js",
   "server.js",
   "panel-avatar.png",
   "THIRD_PARTY_NOTICES.md",
@@ -902,6 +1003,7 @@ async function 检查并应用更新() {
           if (!/^#!.*\b(ba)?sh\b/.test(text)) throw new Error(`${file} is not a shell script`);
         }
         const tmpPath = path.join(__dirname, `.${file}.tmp.${process.pid}`);
+        fs.mkdirSync(path.dirname(tmpPath), { recursive: true });
         fs.writeFileSync(tmpPath, text, "utf8");
         if (file.endsWith(".sh")) {
           let parsed = true;
@@ -957,7 +1059,46 @@ async function 检查并应用更新() {
         }
       }
 
-      for (const { tmpPath, targetPath } of tmpFiles) fs.renameSync(tmpPath, targetPath);
+      let farmSourcesUpdated = false;
+      for (const { tmpPath, targetPath } of tmpFiles) {
+        fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+        fs.renameSync(tmpPath, targetPath);
+        if (targetPath.includes(`${path.sep}warp-farm${path.sep}`)) farmSourcesUpdated = true;
+      }
+      if (farmSourcesUpdated) {
+        try {
+          const cp = require("child_process");
+          const probe = cp.spawnSync("go", ["version"], { stdio: "ignore", timeout: 5000 });
+          if (probe.status !== 0) {
+            console.warn("[fucking-opencode] sumber warp-farm diperbarui, tetapi Go tidak tersedia; binary lama dipertahankan.");
+          } else {
+            const dir = path.join(__dirname, "warp-farm");
+            const exe = process.platform === "win32" ? "warp-farm.exe" : "warp-farm";
+            const target = path.join(dir, exe);
+            const tmpBin = path.join(dir, `.build-${process.pid}${process.platform === "win32" ? ".exe" : ""}`);
+            const built = cp.spawnSync("go", ["build", "-trimpath", "-o", tmpBin, "."], {
+              cwd: dir,
+              stdio: "ignore",
+              timeout: 180000,
+              env: { ...process.env, CGO_ENABLED: "0" },
+            });
+            if (built.status !== 0 || !fs.existsSync(tmpBin)) {
+              try { fs.unlinkSync(tmpBin); } catch {}
+              console.warn("[fucking-opencode] build ulang warp-farm gagal; binary lama dipertahankan.");
+            } else {
+              await warpFarm.停止().catch(() => {});
+              try {
+                if (fs.existsSync(target)) fs.renameSync(target, `${target}.old`);
+              } catch {}
+              fs.renameSync(tmpBin, target);
+              try { fs.chmodSync(target, 0o755); } catch {}
+              console.log("[fucking-opencode] binary warp-farm dibangun ulang dari sumber baru.");
+            }
+          }
+        } catch (err) {
+          console.warn(`[fucking-opencode] build ulang warp-farm dilewati: ${err.message}`);
+        }
+      }
       console.log(
         `[fucking-opencode] 已自更新 ${VERSION} → ${remoteVersion}；退出以让服务重启。`
       );
@@ -1100,6 +1241,7 @@ function 记录出口失败(state, { reason, cooldownMs = null } = {}) {
   const pool = proxy.describe().pool;
   if (!pool || !pool.active) return;
   proxy.markFailure(url, { reason, cooldownMs });
+  if (state.traceId) 观测.出口事件(state.traceId, { exit: egressLabelForStats(state.egress), action: "fail", reason });
   可能轮换WARP出口(url, reason);
 }
 
@@ -1110,16 +1252,19 @@ function 记录出口失败(state, { reason, cooldownMs = null } = {}) {
  */
 function 换一条出口(state, { reason, cooldownMs = null } = {}) {
   if (!state) return false;
+  if (运维.生效().noRotation) return false;
   const pool = proxy.describe().pool;
   if (!pool || !pool.active || pool.enabled <= 1) return false;
   const used = Number(state.egressSwaps) || 0;
   if (used >= 最大出口重试) return false;
+  const 旧标签 = egressLabelForStats(state.egress);
   记录出口失败(state, { reason, cooldownMs });
   const next = proxy.pick({ exclude: state.egressUrl });
   if (!next || next.url === state.egressUrl) return false;
   state.egress = next;
   state.egressUrl = next.url;
   state.egressSwaps = used + 1;
+  if (state.traceId) 观测.出口事件(state.traceId, { exit: 旧标签, action: "swap", reason });
   return true;
 }
 
@@ -1132,6 +1277,7 @@ function 换一条出口(state, { reason, cooldownMs = null } = {}) {
  */
 function 可能轮换WARP出口(url, reason) {
   if (!url || !/^socks5:\/\//i.test(String(url))) return;
+  if (运维.生效().noRotation) return;
   const lanes = (warpFarm.状态() || {}).lanes || [];
   const lane = lanes.find((entry) => entry && entry.url === url);
   if (!lane) return;
@@ -2378,6 +2524,7 @@ function 提取Responses结束原因(ev, hasToolCalls) {
 
 // 持久会话缓存 —— 跨轮保留上游提示/KV 缓存（LRU）
 const sessionCache = new Map();
+const 会话出口 = new Map();
 const MAX_SESSIONS = 500;
 const SESSION_TTL_MS = 3 * 3600 * 1000;
 let 上次失败网关重试时间 = 0;
@@ -2419,6 +2566,15 @@ function 审计网关形态(upstreamBody, headers) {
     userAgentOk: /^opencode\/[A-Za-z0-9-]+\/\d+\.\d+\.\d+\/[A-Za-z0-9-]+$/i.test(ua),
     userAgent: ua,
     sessionHeaders,
+    read: toolNames.includes("read"),
+    hasUserAgent: hasHeader("user-agent"),
+    hasSession: hasHeader("x-opencode-session"),
+    hasAffinity: hasHeader("x-session-affinity"),
+    shapeOk:
+      toolNames.includes("read") &&
+      /^opencode\/[A-Za-z0-9-]+\/\d+\.\d+\.\d+\/[A-Za-z0-9-]+$/i.test(ua) &&
+      hasHeader("x-opencode-session") &&
+      hasHeader("x-session-affinity"),
   };
 }
 
@@ -2485,6 +2641,199 @@ function egressLabelForStats(picked) {
   } catch {
     return "unknown";
   }
+}
+
+function 网关健康上下文() {
+  const 冷却中 = 上次失败网关重试时间 > 0 && Date.now() - 上次失败网关重试时间 < GATE_RETRY_COOLDOWN_MS;
+  return {
+    status: 上次IP滥用时间 > 0 ? "ip-blocked" : 冷却中 ? "throttled" : "open",
+    ipBlockedSince: 上次IP滥用时间 || null,
+    throttledUntil: 冷却中 ? 上次失败网关重试时间 + GATE_RETRY_COOLDOWN_MS : null,
+    cooldownMs: GATE_RETRY_COOLDOWN_MS,
+    anchors: {
+      tools: identity.GATE_ANCHOR_TOOL_NAMES.slice(),
+      headers: identity.GATE_ANCHOR_HEADER_NAMES.slice(),
+    },
+    lastRejection: 上次网关诊断,
+    lastUpstreamError: 上次上游错误,
+  };
+}
+
+function 模型判定(id) {
+  const verdict = identity.getCatalogVerdict(String(id || "").toLowerCase());
+  if (verdict) return verdict;
+  if (在线模型表.length > 0 && !在线模型表.some((row) => row.id === id)) return "offline";
+  return "free";
+}
+
+function 采样样本() {
+  let pool = { mode: "direct", enabled: 0, ready: 0, cooling: 0 };
+  try {
+    const described = proxy.describe() || {};
+    if (described.pool) {
+      pool = {
+        mode: described.mode || described.pool.mode || "pool",
+        enabled: described.pool.active || described.pool.size || 0,
+        ready: described.pool.ready || 0,
+        cooling: described.pool.cooling || 0,
+      };
+    }
+  } catch {}
+  let farm = {};
+  try { farm = warpFarm.状态 ? warpFarm.状态() : {}; } catch {}
+  const lanes = Array.isArray(farm.lanes) ? farm.lanes : [];
+  return {
+    pool,
+    farm,
+    farmExpected: WARP_FARM_ENABLED,
+    anonymousPauseMs: typeof 匿名暂停剩余毫秒 === "function" ? 匿名暂停剩余毫秒() : 0,
+    gate: 网关健康上下文(),
+    modelCooldowns: 模型组.诊断().length,
+    coolingBlocks: Array.isArray(farm.coolingBlocks) ? farm.coolingBlocks.length : 0,
+    safeMode: 运维.生效().active,
+    lanes: lanes.length,
+    ready: lanes.filter((lane) => lane && lane.ready).length,
+  };
+}
+
+function 会话快照() {
+  const now = Date.now();
+  const rows = [];
+  for (const [hash, entry] of sessionCache) {
+    const egress = entry && entry.sessionId ? 会话出口.get(entry.sessionId) : null;
+    rows.push({
+      hash: String(hash).slice(0, 12),
+      session: entry && entry.sessionId ? String(entry.sessionId).slice(0, 12) : "",
+      lastSeenAt: entry ? entry.lastSeen : null,
+      ageMs: entry && entry.lastSeen ? now - entry.lastSeen : null,
+      ttlMs: SESSION_TTL_MS,
+      egress: egress ? egress.egress : null,
+      egressAgeMs: egress ? now - egress.at : null,
+    });
+  }
+  return rows.sort((a, b) => (b.lastSeenAt || 0) - (a.lastSeenAt || 0)).slice(0, 100);
+}
+
+function 密钥用量() {
+  const keys = panelSettings.listApiKeys();
+  const 每密钥 = new Map();
+  let history = [];
+  try { history = 用量统计.读历史() || []; } catch {}
+  const since = Date.now() - 24 * 3600 * 1000;
+  for (const row of history) {
+    if (!row || (row.at && row.at < since)) continue;
+    const label = String(row.key_label || row.keyLabel || "") || "(tanpa label)";
+    let stat = 每密钥.get(label);
+    if (!stat) {
+      stat = { requests24h: 0, errors24h: 0, status429: 0 };
+      每密钥.set(label, stat);
+    }
+    stat.requests24h += 1;
+    if (Number(row.status) >= 400) stat.errors24h += 1;
+    if (Number(row.status) === 429) stat.status429 += 1;
+  }
+  return {
+    keys: keys.map((key) => {
+      const counter = 密钥计数.get(key.label) || null;
+      const now = Date.now();
+      const minuteUsed = counter && now - counter.分钟起点 < 分钟窗口毫秒 ? counter.分钟次数 : 0;
+      const dayUsed = counter && now - counter.日起点 < 日窗口毫秒 ? counter.日次数 : 0;
+      const usage = 每密钥.get(key.label || "(tanpa label)") || { requests24h: 0, errors24h: 0, status429: 0 };
+      return {
+        id: key.id,
+        label: key.label,
+        preview: key.preview,
+        enabled: key.enabled,
+        source: key.source,
+        models: key.models,
+        rpm: key.rpm,
+        daily: key.daily,
+        burst: key.burst || 0,
+        concurrency: key.concurrency || 0,
+        minuteUsed,
+        dayUsed,
+        concurrencyUsed: counter ? counter.并发 || 0 : 0,
+        rpmRemaining: key.rpm > 0 ? Math.max(0, key.rpm - minuteUsed) : null,
+        dailyRemaining: key.daily > 0 ? Math.max(0, key.daily - dayUsed) : null,
+        burstRemaining: key.burst > 0 ? Math.max(0, key.burst - (counter && now - counter.突发起点 < 突发窗口毫秒 ? counter.突发次数 : 0)) : null,
+        ...usage,
+      };
+    }),
+    totals24h: [...每密钥.entries()].map(([label, stat]) => ({ label, ...stat })).sort((a, b) => b.requests24h - a.requests24h).slice(0, 20),
+  };
+}
+
+function 收集诊断() {
+  let config = {};
+  try { config = configModule.快照(); } catch {}
+  let modelHealth = [];
+  try { modelHealth = 模型组.诊断(); } catch {}
+  let events = [];
+  try { events = 事件环.slice(-200); } catch {}
+  return {
+    health: { version: VERSION, uptimeSeconds: Math.round(process.uptime()), gate: 网关健康上下文() },
+    config,
+    pool: proxy.describe(),
+    farm: warpFarm.状态 ? warpFarm.状态() : {},
+    modelHealth,
+    observability: 观测.快照(采样样本()),
+    incidents: 观测.快照(采样样本()).incidents,
+    events,
+    shapes: 观测.快照(采样样本()).shapes,
+    summary: `requests=${观测.快照(采样样本()).counters.total} inflight=${观测.快照(采样样本()).inflight.length}`,
+  };
+}
+
+function 备份预览(文件) {
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const 目录 = 备份状态目录();
+  const 允许 = new Set(["config.json", "settings.json", "proxy.json", "warp-farm.json", "model-health.json"]);
+  const 结果 = [];
+  for (const [name, content] of Object.entries(文件 || {})) {
+    if (!允许.has(name)) continue;
+    const target = path.join(目录, name);
+    let current = null;
+    try { current = JSON.parse(fs.readFileSync(target, "utf8")); } catch {}
+    const next = content && typeof content === "object" && content.files && typeof content.files === "object"
+      ? content.files[name] ?? content
+      : content;
+    let diff = { added: [], removed: [], changed: [] };
+    if (current && next && typeof next === "object" && !Array.isArray(next)) {
+      const keys = new Set([...Object.keys(current), ...Object.keys(next)]);
+      for (const key of keys) {
+        if (!(key in current)) diff.added.push(key);
+        else if (!(key in next)) diff.removed.push(key);
+        else if (JSON.stringify(current[key]) !== JSON.stringify(next[key])) diff.changed.push(key);
+      }
+    }
+    结果.push({ file: name, exists: current !== null, diff, valid: Boolean(next && typeof next === "object") });
+  }
+  return { files: 结果, dir: 目录 };
+}
+
+function 告警() {
+  const sample = 采样样本();
+  const 列表 = [];
+  if (sample.pool.mode === "pool" && sample.pool.enabled > 0 && sample.pool.ready === 0) {
+    列表.push({ key: "pool_empty", severity: "error", text: "Pool kosong: semua request akan gagal cepat.", view: "pool" });
+  }
+  if (sample.farmExpected && sample.lanes > 0 && sample.ready / sample.lanes < 0.5) {
+    列表.push({ key: "lanes_low", severity: "warn", text: `Lane WARP siap ${sample.ready}/${sample.lanes}.`, view: "warpfarm" });
+  }
+  if (sample.anonymousPauseMs > 0) {
+    列表.push({ key: "anonymous_paused", severity: "warn", text: `Anonymous lane dijeda ${Math.ceil(sample.anonymousPauseMs / 1000)} dtk.`, view: "health" });
+  }
+  if (sample.gate.status === "ip-blocked") {
+    列表.push({ key: "gate_abuse", severity: "error", text: "Gate melaporkan ip-abuse.", view: "health" });
+  }
+  if (sample.coolingBlocks > 0) {
+    列表.push({ key: "blocks_cooling", severity: "info", text: `${sample.coolingBlocks} blok /64 cooling.`, view: "pool" });
+  }
+  if (sample.farmExpected && sample.farm && sample.farm.running === false) {
+    列表.push({ key: "farm_down", severity: "error", text: "WARP farm tidak berjalan.", view: "warpfarm" });
+  }
+  return 列表;
 }
 
 function getPersistentSessionId(req, body) {
@@ -2961,6 +3310,10 @@ async function 处理请求主体(req, res) {
     }
   }
 
+  if (pathname.startsWith("/api/observability") || pathname === "/api/models" || pathname === "/api/models/test" || pathname === "/api/models/simulate" || pathname === "/api/diag/payload" || pathname === "/api/diagnostics/bundle" || pathname === "/api/selftest" || pathname === "/api/ops" || pathname.startsWith("/api/ops/") || pathname === "/api/keys/usage" || pathname === "/api/sessions" || pathname.startsWith("/api/farm/") || pathname === "/api/backup/preview" || pathname === "/api/audit" || pathname === "/api/retention" || pathname === "/api/retention/run" || pathname === "/api/backups" || pathname === "/api/backups/restore" || pathname === "/api/autoheal" || pathname === "/api/autoheal/run" || pathname === "/api/notify" || pathname === "/api/notify/test") {
+    if (await dashboardApi.处理(req, res, pathname)) return;
+  }
+
   if ((req.method === "GET" || req.method === "HEAD") && (pathname === "/panel-avatar.png" || pathname === "/favicon.ico")) {
     try {
       const bytes = require("fs").readFileSync(require("path").join(__dirname, "panel-avatar.png"));
@@ -3026,7 +3379,7 @@ async function 处理请求主体(req, res) {
     }
     if (!panelAuthorized(req)) return panelUnauthorized(res);
     res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
-    return res.end(JSON.stringify(runtimeConfig.快照()));
+    return res.end(JSON.stringify({ ...runtimeConfig.快照(), snapshots: runtimeConfig.快照历史() }));
   }
 
   if (pathname === "/api/config" && req.method === "POST") {
@@ -3049,12 +3402,15 @@ async function 处理请求主体(req, res) {
       res.writeHead(err.statusCode === 413 ? 413 : 400, { "Content-Type": "application/json", "Cache-Control": "no-store" });
       return res.end(JSON.stringify({ error: `请求体无效：${err.message}` }));
     }
-    const result = runtimeConfig.写入(payload);
+    const result = typeof payload.restoreSnapshot === "string" && payload.restoreSnapshot
+      ? runtimeConfig.恢复快照(payload.restoreSnapshot)
+      : runtimeConfig.写入(payload);
     if (!result.ok) {
       res.writeHead(400, { "Content-Type": "application/json", "Cache-Control": "no-store" });
       return res.end(JSON.stringify(result));
     }
     记录事件("运行时配置已更新（/api/config）", "info");
+    审计面板(req, payload.restoreSnapshot ? "config.restore" : "config.save", { ok: true, keys: Object.keys(payload).slice(0, 20) });
     res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
     return res.end(JSON.stringify(result));
   }
@@ -3090,8 +3446,8 @@ async function 处理请求主体(req, res) {
         const result = panelSettings.addApiKey(payload.addApiKey);
         if (!result.ok) error = result.error;
       } else if (payload.updateApiKey && typeof payload.updateApiKey === "object") {
-        const { id, label, enabled, rpm, daily, models } = payload.updateApiKey;
-        const result = panelSettings.updateApiKey(String(id || ""), { label, enabled, rpm, daily, models });
+        const { id, label, enabled, rpm, daily, burst, concurrency, models } = payload.updateApiKey;
+        const result = panelSettings.updateApiKey(String(id || ""), { label, enabled, rpm, daily, burst, concurrency, models });
         if (!result.ok) error = result.error;
       } else if (typeof payload.deleteApiKey === "string") {
         const result = panelSettings.deleteApiKey(payload.deleteApiKey);
@@ -3121,6 +3477,7 @@ async function 处理请求主体(req, res) {
         重置面板会话密钥();
         panelSetCookie(res);
       }
+      审计面板(req, "settings.save", { ok: true, keys: Object.keys(payload).slice(0, 20), passwordChanged });
       res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
       return res.end(JSON.stringify({ ok: true, ...panelSettings.describe(), defaultModel: 默认模型值() || "", projectMode: 项目重置模式 }));
     }
@@ -3188,6 +3545,7 @@ async function 处理请求主体(req, res) {
         已写.push(name);
       }
       记录事件(`状态已恢复（${已写.join(", ") || "无"}）`, "warn");
+      审计面板(req, "state.restore", { ok: true, restored: 已写, rejected: 拒绝 });
       res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
       return res.end(JSON.stringify({ ok: true, restored: 已写, rejected: 拒绝 }));
     }
@@ -3234,6 +3592,7 @@ async function 处理请求主体(req, res) {
     }
     // `处理代理API` 是异步的；意外抛出必须变成 500，而不是
     // 未处理 rejection —— 它会让 socket 挂着。
+    if (req.method === "POST" && pathname === "/api/proxy") 审计面板(req, "proxy.update", { ok: true });
     处理代理API(req, res, pathname).catch((err) => {
       if (res.headersSent) return res.destroy();
       res.writeHead(500, { "Content-Type": "application/json", "Cache-Control": "no-store" });
@@ -3256,6 +3615,7 @@ async function 处理请求主体(req, res) {
         return res.end(JSON.stringify({ error: "Content-Type harus application/json." }));
       }
     }
+    if (req.method === "POST") 审计面板(req, "warp.update", { ok: true });
     处理WARPAPI(req, res).catch((err) => {
       if (res.headersSent) return res.destroy();
       res.writeHead(500, { "Content-Type": "application/json", "Cache-Control": "no-store" });
@@ -3278,6 +3638,7 @@ async function 处理请求主体(req, res) {
         return res.end(JSON.stringify({ error: "Content-Type harus application/json." }));
       }
     }
+    if (req.method === "POST") 审计面板(req, "farm.update", { ok: true });
     处理WARPFarmAPI(req, res).catch((err) => {
       if (res.headersSent) return res.destroy();
       res.writeHead(500, { "Content-Type": "application/json", "Cache-Control": "no-store" });
@@ -3379,7 +3740,7 @@ async function 处理请求主体(req, res) {
       }
     }
     res.writeHead(200, { "Content-Type": "text/plain; version=0.0.4; charset=utf-8", "Cache-Control": "no-store" });
-    return res.end(渲染指标());
+    return res.end(渲染指标() + 观测.指标());
   }
 
   // OpenAPI 3.1：客户端生成器与调试器用的最小描述。
@@ -3425,9 +3786,9 @@ async function 处理请求主体(req, res) {
 
   // 对话补全接口
   if (req.method === "POST" && (pathname === "/v1/chat/completions" || pathname === "/chat/completions")) {
-    const 密钥拒绝 = 检查API密钥(req);
+    const 密钥拒绝 = 检查API密钥(req, res);
     if (密钥拒绝) {
-      const headers = { "Content-Type": "application/json" };
+      const headers = { "Content-Type": "application/json", ...(密钥拒绝.__headers || {}) };
       if (密钥拒绝.__retryAfter) headers["Retry-After"] = String(密钥拒绝.__retryAfter);
       res.writeHead(密钥拒绝.__status || 401, headers);
       return res.end(JSON.stringify({ error: 密钥拒绝.error }));
@@ -3574,11 +3935,35 @@ async function 处理请求主体(req, res) {
         ...用量标签(req),
       } : null;
       if (统计) res.setHeader("X-Request-Id", 统计.request_id);
+      if (统计) {
+        观测.开始请求(统计.request_id, {
+          model: targetModel,
+          protocol: "openai",
+          stream: clientStream,
+          keyLabel: 统计.key_label,
+          clientIp: 统计.client_ip,
+        });
+      }
       const 落盘统计 = (status, extra = {}) => {
         if (!统计) return;
         const egressLabel = typeof egressStateRef === "function" ? egressLabelForStats(egressStateRef()) : "direct";
         // 兼容路由自call 时从这里读出口标签（X-Gateway-Egress）。
         try { res.setHeader("X-Gateway-Egress", egressLabel); } catch {}
+        观测.结束(统计.request_id, {
+          status,
+          ms: Date.now() - 统计.t0,
+          egress: egressLabel,
+          error: extra.error,
+          input_tokens: extra.input_tokens,
+          output_tokens: extra.output_tokens,
+          ttftMs: 统计.ttft_ms,
+        });
+        if (sessionId) {
+          try {
+            会话出口.set(sessionId, { egress: egressLabel, at: Date.now() });
+            if (会话出口.size > MAX_SESSIONS) 会话出口.delete(会话出口.keys().next().value);
+          } catch {}
+        }
         用量统计.记录请求({
           ...统计,
           status,
@@ -3620,9 +4005,30 @@ async function 处理请求主体(req, res) {
 
       // 每个客户端请求一个出口。模型回退共用同一出口 —— 上游把重试
       // 绑在见过首次尝试的地址上；只有代理不可达或网关点名出口时才换。
-      const egressState = { egress: proxy.pick(), egressUrl: null, transportFailures: 0, egressSwaps: 0 };
+      const egressState = { egress: proxy.pick(), egressUrl: null, transportFailures: 0, egressSwaps: 0, traceId: 统计 ? 统计.request_id : null };
       egressState.egressUrl = egressState.egress.url;
+      if (运维.生效().singleLane) {
+        try {
+          const entries = typeof proxy.getPool === "function" ? proxy.getPool() : [];
+          const pinned = entries.find((entry) => entry && entry.url && entry.enabled !== false);
+          if (pinned) {
+            egressState.egress = { url: pinned.url, source: "pool", id: pinned.id, label: pinned.id };
+            egressState.egressUrl = pinned.url;
+          }
+        } catch {}
+      }
       egressStateRef = () => egressState.egress;
+      if (统计) {
+        const 收尾 = () => {
+          观测.结束(统计.request_id, {
+            status: res.statusCode,
+            ms: Date.now() - 统计.t0,
+            egress: egressLabelForStats(egressState.egress),
+          });
+        };
+        res.once("finish", 收尾);
+        res.once("close", 收尾);
+      }
       // 兼容路由自call 时从这里读出口标签。必须在任何 writeHead 之前 set。
       if (统计) {
         try { res.setHeader("X-Gateway-Egress", egressLabelForStats(egressState.egress)); } catch {}
@@ -3658,6 +4064,23 @@ async function 处理请求主体(req, res) {
         let { upstreamBody, aliasToOriginal } = buildUpstreamPayload(body, targetModel, useResponses);
         let liveEndpoints = 解析端点(targetModel);
         let upstreamUrl = useResponses ? liveEndpoints.responsesUrl : liveEndpoints.chatUrl;
+        if (统计) {
+          观测.尝试(统计.request_id, targetModel);
+          观测.出口事件(统计.request_id, { exit: egressLabelForStats(egressState.egress), action: "attempt" });
+          const msgs = Array.isArray(upstreamBody.messages) ? upstreamBody.messages : [];
+          观测.记录形状({
+            model: targetModel,
+            protocol: useResponses ? "responses" : "chat",
+            stream: Boolean(upstreamBody.stream),
+            messages: msgs.length,
+            roles: msgs.map((m) => String(m && m.role || "")).slice(0, 20),
+            systemChars: msgs.filter((m) => m && m.role === "system").reduce((n, m) => n + String(m.content || "").length, 0),
+            tools: Array.isArray(upstreamBody.tools) ? upstreamBody.tools.length : 0,
+            toolNames: (Array.isArray(upstreamBody.tools) ? upstreamBody.tools : []).map((t) => t?.function?.name || t?.name).filter(Boolean).slice(0, 30),
+            headers: Object.keys(upstreamHeaders || {}),
+            anchors: 审计网关形态(upstreamBody, upstreamHeaders),
+          });
+        }
         // 可回退判定：还没到最后一个候选，且失败与模型/容量/上游有关。
         const 可切换模型 = (状态) =>
           当前候选 + 1 < 候选列表.length &&
@@ -4162,6 +4585,7 @@ async function 处理请求主体(req, res) {
         // 这个出口承载了上游接受的请求，失败史已过期：清掉，
         // 下一次挑选把它当健康。
         proxy.markSuccess(egressState.egressUrl);
+        if (统计) 观测.出口事件(统计.request_id, { exit: egressLabelForStats(egressState.egress), action: "success" });
         记录匿名成功();
         模型组.记录成功(targetModel);
         const completionId = `chatcmpl-${crypto.randomBytes(12).toString("hex")}`;
@@ -4333,7 +4757,7 @@ async function 处理请求主体(req, res) {
               } catch {}
             };
 
-            await 消费SSE行(reader, decoder, handleResponsesStreamLine, 首事件超时毫秒());
+            await 消费SSE行(reader, decoder, handleResponsesStreamLine, 首事件超时毫秒(), 统计 ? 统计.request_id : null, 统计 ? 统计.t0 : 0);
             if (streamAbortedByError) {
               落盘统计(502, { error: "上游在流内失败" });
               if (!res.writableEnded) res.end();
@@ -4417,7 +4841,7 @@ async function 处理请求主体(req, res) {
               }
             };
 
-            await 消费SSE行(reader, decoder, handleChatStreamLine, 首事件超时毫秒());
+            await 消费SSE行(reader, decoder, handleChatStreamLine, 首事件超时毫秒(), 统计 ? 统计.request_id : null, 统计 ? 统计.t0 : 0);
             if (!res.writableEnded) {
               if (!sseHeadersSent) writeSse("data: [DONE]\n\n");
               res.end();
@@ -4552,7 +4976,7 @@ async function 处理请求主体(req, res) {
           } catch {}
         };
 
-        await 消费SSE行(reader, decoder, handleNonStreamLine, 首事件超时毫秒());
+        await 消费SSE行(reader, decoder, handleNonStreamLine, 首事件超时毫秒(), 统计 ? 统计.request_id : null, 统计 ? 统计.t0 : 0);
 
         if (streamError) {
           console.warn(`[fucking-opencode] 上游在流内失败：${streamError}`);
@@ -4606,9 +5030,17 @@ async function 处理请求主体(req, res) {
         }
         if (err && err.code === "first_event_timeout") {
           记录出口失败(egressState, { reason: "first_event_timeout" });
+          const 已换出口 = 换一条出口(egressState, { reason: "first_event_timeout" });
           console.warn(
-            `[fucking-opencode] 上游 ${proxy.displayHost(egressState.egressUrl) || "direct"} 首个事件超时（${首事件超时毫秒()}ms），出口已进入冷却。`
+            `[fucking-opencode] 上游 ${proxy.displayHost(egressState.egressUrl) || "direct"} 首个事件超时（${首事件超时毫秒()}ms），出口已进入冷却${已换出口 ? "并已切换" : ""}。`
           );
+          if (当前候选 + 1 < 候选列表.length) {
+            模型组.记录失败(targetModel, 504);
+            console.warn(
+              `[fucking-opencode] 首个事件超时：模型 ${targetModel}；改试 ${候选列表[当前候选 + 1]}`
+            );
+            continue 模型尝试;
+          }
           const 错误体 = {
             message: `Upstream sent no first event within ${首事件超时毫秒()}ms; the egress was cooled and the request may be retried.`,
             type: "first_event_timeout",
@@ -4674,9 +5106,9 @@ async function 处理请求主体(req, res) {
   // 形态审计全部复用，绝不向上游发第二套协议形状。
   // ------------------------------------------------------------------
   if (req.method === "POST" && (pathname === "/v1/messages" || pathname === "/messages")) {
-    const 密钥拒绝 = 检查API密钥(req);
+    const 密钥拒绝 = 检查API密钥(req, res);
     if (密钥拒绝) {
-      const headers = { "Content-Type": "application/json" };
+      const headers = { "Content-Type": "application/json", ...(密钥拒绝.__headers || {}) };
       if (密钥拒绝.__retryAfter) headers["Retry-After"] = String(密钥拒绝.__retryAfter);
       res.writeHead(密钥拒绝.__status || 401, headers);
       return res.end(JSON.stringify({ type: "error", error: 密钥拒绝.error }));
@@ -4690,9 +5122,9 @@ async function 处理请求主体(req, res) {
     return 处理Anthropic消息(req, res);
   }
   if (req.method === "POST" && pathname === "/v1/messages/count_tokens") {
-    const 密钥拒绝 = 检查API密钥(req);
+    const 密钥拒绝 = 检查API密钥(req, res);
     if (密钥拒绝) {
-      const headers = { "Content-Type": "application/json" };
+      const headers = { "Content-Type": "application/json", ...(密钥拒绝.__headers || {}) };
       if (密钥拒绝.__retryAfter) headers["Retry-After"] = String(密钥拒绝.__retryAfter);
       res.writeHead(密钥拒绝.__status || 401, headers);
       return res.end(JSON.stringify({ type: "error", error: 密钥拒绝.error }));
@@ -4700,9 +5132,9 @@ async function 处理请求主体(req, res) {
     return 处理Anthropic计数(req, res);
   }
   if (req.method === "POST" && (pathname === "/v1/completions" || pathname === "/completions")) {
-    const 密钥拒绝 = 检查API密钥(req);
+    const 密钥拒绝 = 检查API密钥(req, res);
     if (密钥拒绝) {
-      const headers = { "Content-Type": "application/json" };
+      const headers = { "Content-Type": "application/json", ...(密钥拒绝.__headers || {}) };
       if (密钥拒绝.__retryAfter) headers["Retry-After"] = String(密钥拒绝.__retryAfter);
       res.writeHead(密钥拒绝.__status || 401, headers);
       return res.end(JSON.stringify({ error: 密钥拒绝.error }));
@@ -4720,9 +5152,9 @@ async function 处理请求主体(req, res) {
     return res.end(JSON.stringify({ error: { message: "上游免费层不提供 embeddings；请改用 /v1/chat/completions 或 /v1/completions。", type: "invalid_request_error", code: "embeddings_not_supported" } }));
   }
   if (req.method === "POST" && (pathname === "/v1/responses" || pathname === "/responses")) {
-    const 密钥拒绝 = 检查API密钥(req);
+    const 密钥拒绝 = 检查API密钥(req, res);
     if (密钥拒绝) {
-      const headers = { "Content-Type": "application/json" };
+      const headers = { "Content-Type": "application/json", ...(密钥拒绝.__headers || {}) };
       if (密钥拒绝.__retryAfter) headers["Retry-After"] = String(密钥拒绝.__retryAfter);
       res.writeHead(密钥拒绝.__status || 401, headers);
       return res.end(JSON.stringify({ error: 密钥拒绝.error }));
@@ -5206,13 +5638,18 @@ function 处理统计API(req, res, pathname) {
   return res.end(JSON.stringify({ requests: rows.slice(-limit).reverse(), file: 用量统计.用量文件路径() }));
 }
 
-async function 消费SSE行(reader, decoder, onLine, 首事件毫秒 = 0) {
+async function 消费SSE行(reader, decoder, onLine, 首事件毫秒 = 0, traceId = null, startedAt = 0) {
   let buffer = "";
   let 首个块 = true;
+  let 首个字节已记 = false;
   while (true) {
     const { done, value } =
       首个块 && 首事件毫秒 > 0 ? await 读首个数据块(reader, 首事件毫秒) : await reader.read();
     首个块 = false;
+    if (value && !首个字节已记 && traceId) {
+      首个字节已记 = true;
+      观测.首事件(traceId, Date.now() - (Number(startedAt) || Date.now()), null);
+    }
     if (done) {
       buffer += decoder.decode();
       if (buffer.trim()) {
@@ -5271,6 +5708,83 @@ function 创建HTTP服务器(处理器) {
     处理器
   );
 }
+
+/** 管理面审计：只记动作与结果，绝不写入请求体。 */
+function 审计面板(req, action, detail = {}) {
+  try {
+    const ok = detail && detail.ok !== false;
+    return 审计.记录({
+      action,
+      actor: "panel",
+      ip: (req && req.socket && req.socket.remoteAddress) || "",
+      status: ok ? 200 : 500,
+      ok,
+      detail,
+    });
+  } catch {
+    return null;
+  }
+}
+
+/** 一轮自愈：只读观测快照，动作由 autoheal 的冷却控制。 */
+async function 运行自愈() {
+  const cfg = 自愈.快照();
+  const settings = cfg.settings || {};
+  if (!(settings.enabled === true || cfg.enabled === true)) return { ok: true, skipped: "disabled" };
+  const gap = Math.max(5, Number(settings.intervalSec || cfg.intervalSec) || 30) * 1000;
+  if (cfg.lastRunAt && Date.now() - cfg.lastRunAt < gap) return { ok: true, skipped: "not-due" };
+  const snap = 观测.快照({});
+  return 自愈.节拍({
+    farm: warpFarm,
+    inflight: snap.inflight.length,
+    notify: 通知,
+    rotate: (port) => warpFarm.轮换(port),
+    restart: () => warpFarm.重启动(),
+    scale: (size) => warpFarm.调整规模(size),
+  });
+}
+
+/** 备份恢复后重新读取磁盘状态；只重载明确受影响的模块。 */
+function 重载状态(files = []) {
+  if (files.includes("config.json") && typeof runtimeConfig.__reload === "function") runtimeConfig.__reload();
+  if (files.includes("proxy.json") && typeof proxy.__reload === "function") proxy.__reload();
+  if (files.includes("model-health.json") && typeof 模型组.__reload === "function") 模型组.__reload();
+}
+
+dashboardApi.初始化({
+  adminRequestError,
+  panelAuthorized,
+  panelUnauthorized,
+  readRequestBody,
+  config: runtimeConfig,
+  modelGroups: 模型组,
+  settings: panelSettings,
+  proxy,
+  farm: warpFarm,
+  obs: 观测,
+  notify: 通知,
+  diagnostics: 诊断包,
+  selftest: 自检,
+  ops: 运维,
+  audit: 审计,
+  retention: 保留,
+  backup: 备份,
+  autoheal: 自愈,
+  审计: 审计面板,
+  runAutoheal: 运行自愈,
+  reloadState: 重载状态,
+  模型列表: () => (在线模型表 || []).map((row) => ({ id: row.id, verdict: 模型判定(row.id) })),
+  模型判定,
+  健康上下文: 网关健康上下文,
+  采样样本,
+  密钥用量,
+  会话快照,
+  收集诊断,
+  备份预览,
+  告警,
+  记录事件,
+});
+通知.设置网络请求((url, init) => proxy.netFetch(url, init));
 
 const server = 创建HTTP服务器(主端口处理器);
 let adminServer = null;
@@ -5362,6 +5876,40 @@ if (require.main === module) {
   // 模型清单按上游的节奏轮换，所以留定时器。IDENTITY 不留：它按请求路径
   // 惰性刷新（见 identity.ensureFresh），空闲的桥一个网络调用都不发。
   setInterval(discoverModels, DISCOVERY_TTL_MS).unref();
+  // 观测采样：请求痕迹/事故只存在内存；事故转为活动时推 webhook（若配置）。
+  setInterval(() => {
+    try {
+      const 新事故 = 观测.采样(采样样本());
+      for (const inc of 新事故) {
+        通知.通知事故(true, inc).catch(() => {});
+      }
+    } catch {}
+  }, 15000).unref();
+  // 维护定时器：空闲时轮换/重启，只在面板开启 maintenance 后动作。
+  setInterval(() => {
+    try {
+      const snap = 观测.快照({});
+      运维
+        .节拍({
+          farm: warpFarm.状态 ? warpFarm.状态() : {},
+          incidents: snap.incidents,
+          idle: snap.inflight.length === 0,
+          rotateAll: () => warpFarm.轮换(),
+          restart: () => warpFarm.重启动(),
+        })
+        .catch(() => {});
+    } catch {}
+  }, 60000).unref();
+  // 自愈、保留策略与定时备份共享 60 秒节拍；各自按自己的频率与开关幂等跳过。
+  setInterval(() => {
+    运行自愈().catch(() => {});
+    try {
+      保留.节拍();
+    } catch {}
+    try {
+      备份.节拍();
+    } catch {}
+  }, 60000).unref();
 }
 
 module.exports = {

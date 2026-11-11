@@ -12,6 +12,7 @@ const 默认值 = {
   maxBodyBytes: 10 * 1024 * 1024,
   autoUpdate: true,
   modelGroups: {},
+  modelGroupWeights: {},
   reasoningEffort: "",
   reasoningEffortByModel: {},
 };
@@ -22,6 +23,7 @@ const 环境变量名 = {
   maxBodyBytes: "MAX_BODY_BYTES",
   autoUpdate: "AUTO_UPDATE",
   modelGroups: "FUCKING_OPENCODE_MODEL_GROUPS",
+  modelGroupWeights: "FUCKING_OPENCODE_MODEL_GROUP_WEIGHTS",
   reasoningEffort: "REASONING_EFFORT",
   reasoningEffortByModel: "REASONING_EFFORT_BY_MODEL",
 };
@@ -100,6 +102,35 @@ function 校验(原始) {
         映射[模型.trim()] = 文本;
       }
       值.reasoningEffortByModel = 映射;
+      continue;
+    }
+    if (键 === "modelGroupWeights") {
+      if (!输入 || typeof 输入 !== "object" || Array.isArray(输入)) {
+        问题.push("modelGroupWeights 必须是对象：别名 → (模型 → 权重)。");
+        continue;
+      }
+      const 权重 = {};
+      for (const [别名, 映射] of Object.entries(输入)) {
+        if (!别名.trim() || 别名.length > 60) {
+          问题.push(`modelGroupWeights 别名无效：${别名}`);
+          continue;
+        }
+        if (!映射 || typeof 映射 !== "object" || Array.isArray(映射)) {
+          问题.push(`modelGroupWeights['${别名}'] 必须是对象。`);
+          continue;
+        }
+        const 单组 = {};
+        for (const [模型, 数字] of Object.entries(映射)) {
+          const 值数 = Number(数字);
+          if (!模型.trim() || 模型.length > 200 || !Number.isFinite(值数) || 值数 < 1 || 值数 > 100) {
+            问题.push(`modelGroupWeights['${别名}']['${模型}'] 必须是 1..100 的数字。`);
+            continue;
+          }
+          单组[模型.trim()] = Math.round(值数);
+        }
+        权重[别名] = 单组;
+      }
+      值.modelGroupWeights = 权重;
       continue;
     }
     if (键 === "modelGroups") {
@@ -203,6 +234,15 @@ function 解析环境(键) {
       return undefined;
     }
   }
+  if (键 === "modelGroupWeights") {
+    try {
+      const parsed = JSON.parse(文本);
+      const { 值 } = 校验({ modelGroupWeights: parsed });
+      return { 值: 值.modelGroupWeights, 来源: "env" };
+    } catch {
+      return undefined;
+    }
+  }
   if (键 === "modelGroups") {
     try {
       const parsed = JSON.parse(文本);
@@ -223,6 +263,7 @@ function 取(键) {
   if (env) return env.值;
   const { 值 } = 当前文件配置();
   if (键 === "modelGroups") return 值.modelGroups || {};
+  if (键 === "modelGroupWeights") return 值.modelGroupWeights || {};
   if (值[键] !== undefined && 值[键] !== 默认值[键]) return 值[键];
   return 默认值[键];
 }
@@ -238,7 +279,9 @@ function 快照() {
     const 文件有值 =
       键 === "modelGroups"
         ? Object.keys(值.modelGroups || {}).length > 0
-        : 值[键] !== 默认值[键];
+        : 键 === "modelGroupWeights"
+          ? Object.keys(值.modelGroupWeights || {}).length > 0
+          : 值[键] !== 默认值[键];
     sources[键] = env ? "env" : 文件有值 ? "file" : "default";
   }
   return { file, values, sources, error };
@@ -248,6 +291,68 @@ function __reload() {
   统计时间 = 0;
   缓存 = { 键: "", 值: { ...默认值 }, error: "", 修改时间: 0 };
   return 快照();
+}
+
+const 快照上限 = 10;
+
+function 历史文件() {
+  return path.join(path.dirname(配置文件路径()), "config-history.json");
+}
+
+function 读历史() {
+  try {
+    const data = JSON.parse(fs.readFileSync(历史文件(), "utf8"));
+    if (Array.isArray(data)) return data.filter((row) => row && typeof row === "object").slice(-快照上限);
+  } catch {}
+  return [];
+}
+
+function 保存快照(配置) {
+  const 历史 = 读历史();
+  const body = JSON.stringify(配置 || {});
+  const last = 历史[历史.length - 1];
+  if (last && JSON.stringify(last.config) === body) return;
+  历史.push({ id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`, at: Date.now(), config: 配置 || {} });
+  const 文件 = 历史文件();
+  const 临时 = `${文件}.tmp.${process.pid}`;
+  try {
+    fs.mkdirSync(path.dirname(文件), { recursive: true });
+    fs.writeFileSync(临时, JSON.stringify(历史.slice(-快照上限)), { mode: 0o600 });
+    fs.renameSync(临时, 文件);
+  } catch {
+    try { fs.unlinkSync(临时); } catch {}
+  }
+}
+
+function 快照历史() {
+  return 读历史().map((row) => ({
+    id: row.id,
+    at: row.at,
+    keys: Object.keys(row.config || {}),
+    config: row.config || {},
+  })).reverse();
+}
+
+function 恢复快照(id) {
+  const row = 读历史().find((entry) => entry && entry.id === id);
+  if (!row) return { ok: false, error: "snapshot tidak ditemukan" };
+  const { 值, 问题 } = 校验(row.config || {});
+  if (问题.length) return { ok: false, error: 问题.join(" ") };
+  let 现有 = {};
+  try { 现有 = JSON.parse(fs.readFileSync(配置文件路径(), "utf8")); } catch {}
+  保存快照(现有);
+  const 文件 = 配置文件路径();
+  const 临时 = `${文件}.tmp.${process.pid}`;
+  try {
+    fs.mkdirSync(path.dirname(文件), { recursive: true });
+    fs.writeFileSync(临时, JSON.stringify(值, null, 2), { mode: 0o600 });
+    fs.renameSync(临时, 文件);
+  } catch (err) {
+    try { fs.unlinkSync(临时); } catch {}
+    return { ok: false, error: `写入 config.json 失败：${err.message}` };
+  }
+  __reload();
+  return { ok: true, restored: id, snapshot: 快照() };
 }
 
 /** 合并写入 config.json（原子重命名，0600）；未知键忽略，非法值整体拒绝。 */
@@ -265,6 +370,7 @@ function 写入(patch) {
   }
   const { 问题 } = 校验(原始);
   if (问题.length) return { ok: false, error: 问题.join(" ") };
+  保存快照(原始);
   const 文件 = 配置文件路径();
   const 临时 = `${文件}.tmp.${process.pid}`;
   try {
@@ -286,6 +392,8 @@ module.exports = {
   取,
   快照,
   写入,
+  快照历史,
+  恢复快照,
   __reload,
   默认值,
 };

@@ -367,6 +367,34 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 .diag-tag[data-tone="bad"] { color: var(--bad); border-color: var(--bad); }
 .diag-tag[data-tone="warn"] { color: var(--warn); border-color: var(--warn); }
 .diag-tag[data-tone="ok"] { color: var(--ok); border-color: var(--ok); }
+.incident-banner { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; justify-content: space-between; border-left: 3px solid var(--warn); }
+.incident-banner[data-severity="error"] { border-left-color: var(--bad); }
+.incident-banner ul { margin: 0; padding-left: 18px; min-width: 0; }
+.incident-banner li { overflow-wrap: anywhere; }
+.score-badge { font: 700 1.6rem/1 var(--mono); display: inline-flex; align-items: baseline; gap: 4px; }
+.score-badge small { font: 500 11px/1 var(--sans); color: var(--muted); }
+.trace-row { cursor: pointer; }
+.trace-row:hover { background: var(--surface-2); }
+.trace-row[aria-expanded="true"] { background: var(--surface-2); }
+.waterfall { display: flex; flex-direction: column; gap: 6px; }
+.waterfall .wf-line { display: grid; grid-template-columns: 110px minmax(0, 1fr) 70px; gap: 10px; align-items: center; font-size: 12px; }
+.waterfall .wf-bar { position: relative; height: 10px; border-radius: 5px; background: var(--field); overflow: hidden; }
+.waterfall .wf-bar span { position: absolute; top: 0; bottom: 0; border-radius: 5px; background: var(--accent, #b45309); }
+.waterfall .wf-bar span[data-kind="fail"] { background: var(--bad); }
+.waterfall .wf-bar span[data-kind="swap"] { background: var(--warn); }
+.waterfall .wf-bar span[data-kind="first"] { background: var(--ok); }
+.waterfall .wf-time { text-align: right; color: var(--muted); font-family: var(--mono); }
+.detail-panel { border-top: 1px solid var(--rule); background: var(--surface-2); }
+.detail-panel td { padding: 12px 14px; }
+.mini-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.mini-table th, .mini-table td { padding: 5px 8px; border-bottom: 1px solid var(--rule); text-align: left; vertical-align: top; }
+.mini-table th { color: var(--muted); font-weight: 600; font-size: 11px; }
+.group-candidates { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.group-candidates li { display: flex; align-items: center; gap: 6px; font: 12px/1.5 var(--mono); }
+.group-candidates li .gw { flex: 1 1 auto; overflow-wrap: anywhere; }
+.group-candidates button { padding: 1px 7px; font-size: 11px; }
+.log-filter { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.log-filter input[type="search"] { width: 220px; }
 
 @media (max-width: 860px) {
   .app, .app.is-collapsed { grid-template-columns: minmax(0, 1fr); }
@@ -389,16 +417,16 @@ const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 const AUTH_REQUIRED = document.body.getAttribute("data-auth-required") === "true";
 const PANEL_API_KEY = document.body.getAttribute("data-panel-key") || "";
 
-const VIEWS = { overview: "概览", health: "健康检查", diag: "路由诊断", events: "事件流", logs: "日志", egress: "出口代理", pool: "代理池", warpfarm: "WARP 农场", stats: "用量统计", history: "请求历史", endpoint: "接入点", docs: "API 文档", playground: "测试台", settings: "设置" };
+const VIEWS = { overview: "概览", health: "健康检查", trace: "请求追踪", diag: "路由诊断", events: "事件流", logs: "日志", egress: "出口代理", pool: "代理池", warpfarm: "WARP 农场", stats: "用量统计", history: "请求历史", endpoint: "接入点", docs: "API 文档", playground: "测试台", settings: "设置", ops: "运维" };
 
 // 侧栏只暴露这些分组；分组内的页面通过页头下方的子标签切换。
 const VIEW_GROUPS = {
-  overview: ["overview", "health"],
+  overview: ["overview", "health", "trace"],
   egress: ["egress", "pool", "warpfarm"],
   diagnose: ["diag", "events", "logs"],
   usage: ["stats", "history"],
   developer: ["endpoint", "docs", "playground"],
-  settings: ["settings"],
+  settings: ["settings", "ops"],
 };
 const GROUP_OF = {};
 for (const g of Object.keys(VIEW_GROUPS)) for (const v of VIEW_GROUPS[g]) GROUP_OF[v] = g;
@@ -412,6 +440,28 @@ const I18N = {
     "跳到主内容": "Lewati ke konten utama", "监控": "Pemantauan", "概览": "Ikhtisar", "出口": "Egress", "出口代理": "Proxy Egress", "代理池": "Pool Proxy",
     "数据": "Data", "用量统计": "Statistik Pemakaian", "请求历史": "Riwayat Permintaan", "工具": "Alat", "接入点": "Titik Akses", "API 文档": "Dokumentasi API",
     "测试": "Uji", "冷却中": "Pendingin", "已停用": "Nonaktif",
+    "请求追踪": "Jejak Permintaan", "运维": "Operasi", "健康检查": "Pemeriksaan Kesehatan", "安全模式": "Mode Aman", "定时维护": "Perawatan Terjadwal",
+    "模型健康": "Kesehatan Model", "出口记分牌": "Papan skor egress", "诊断包": "Paket diagnostik", "自检": "Uji mandiri", "请求形态与锚点": "Bentuk permintaan & anchor",
+    "安全模式、定时维护、自检与诊断包。所有动作只影响本机网关。": "Mode aman, perawatan terjadwal, uji mandiri, dan paket diagnostik. Semua aksi hanya memengaruhi gateway lokal.",
+    "立即生效": "Berlaku segera", "仅空闲时执行": "Hanya saat idle", "启用": "Aktifkan",
+    "开启安全模式": "Aktifkan mode aman", "关闭安全模式": "Nonaktifkan mode aman",
+    "开启后固定单条出口、禁止轮换，用于排查「出口越多越乱」的场景。到期自动关闭。": "Saat aktif, kunci satu egress dan larang rotasi; untuk mendiagnosis kasus 'makin banyak egress makin kacau'. Nonaktif otomatis saat kedaluwarsa.",
+    "自动关闭（分钟）": "Nonaktif otomatis (menit)", "间隔（小时）": "Interval (jam)",
+    "安静时段开始": "Awal jam tenang", "安静时段结束": "Akhir jam tenang",
+    "ip-abuse 时轮换": "Rotasi saat ip-abuse", "ip-abuse 时重启农场": "Restart farm saat ip-abuse",
+    "保存维护设置": "Simpan pengaturan perawatan", "Webhook 通知": "Notifikasi Webhook",
+    "未配置": "Belum diatur", "已配置": "Sudah diatur",
+    "（Discord/Telegram/generic）后，事故自动推送；去重 5 分钟、每分钟最多 10 条。": "(Discord/Telegram/generic), insiden dikirim otomatis; dedupe 5 menit, maksimal 10 per menit.",
+    "发送测试通知": "Kirim notifikasi uji", "运行自检": "Jalankan uji mandiri", "未运行": "Belum dijalankan",
+    "按「运行自检」执行，可能需要 1–2 分钟。": "Tekan 'Jalankan uji mandiri'; butuh 1–2 menit.",
+    "已去敏": "Sudah diredaksi", "下载诊断 ZIP": "Unduh ZIP diagnostik",
+    "打包健康状态、配置、代理池、用量与日志，自动抹去 token、API key、密码和 prompt 内容。": "Mengemas status kesehatan, konfigurasi, pool, pemakaian, dan log; token, API key, password, dan prompt dihapus otomatis.",
+    "读取运维状态失败：": "Gagal membaca status operasi:", "安全模式已开启。": "Mode aman aktif.",
+    "安全模式已关闭。": "Mode aman nonaktif.", "保存失败": "Gagal menyimpan",
+    "维护设置已保存。": "Pengaturan perawatan disimpan.", "测试通知已发送。": "Notifikasi uji terkirim.",
+    "发送失败：": "Gagal mengirim:", "未知错误": "Galat tidak diketahui",
+    "没有可运行的自检": "Tidak ada uji mandiri yang bisa dijalankan", "已排队": "Diantrekan", "项…": "item…",
+    "Key 用量与 Top 消费者": "Pemakaian key & konsumen teratas", "模型组编辑器": "Editor grup model",
     "路由诊断": "Diagnostik Rute", "事件流": "Aliran Peristiwa", "暂停": "Jeda", "继续": "Lanjut", "跳到最新": "Ke terbaru",
     "出口健康": "Kesehatan egress", "按出口统计": "Statistik per egress", "模型失败分布": "Distribusi gagal per model",
     "最近错误": "Galat terakhir", "冷却": "Pendingin", "最后成功": "Berhasil terakhir", "失败率": "Tingkat gagal", "刷新": "Segarkan",
@@ -498,6 +548,28 @@ const I18N = {
   en: {
     "数据": "Data", "用量统计": "Usage Stats", "请求历史": "Request History", "工具": "Tools", "接入点": "Endpoint", "API 文档": "API Docs",
     "测试": "Test", "冷却中": "Cooling", "已停用": "Disabled",
+    "请求追踪": "Request trace", "运维": "Operations", "健康检查": "Health check", "安全模式": "Safe mode", "定时维护": "Scheduled maintenance",
+    "模型健康": "Model health", "出口记分牌": "Exit scoreboard", "诊断包": "Diagnostic bundle", "自检": "Self-test", "请求形态与锚点": "Request shape & anchors",
+    "安全模式、定时维护、自检与诊断包。所有动作只影响本机网关。": "Safe mode, scheduled maintenance, self-test, and diagnostic bundle. Every action only affects this local gateway.",
+    "立即生效": "Applies immediately", "仅空闲时执行": "Runs only when idle", "启用": "Enable",
+    "开启安全模式": "Enable safe mode", "关闭安全模式": "Disable safe mode",
+    "开启后固定单条出口、禁止轮换，用于排查「出口越多越乱」的场景。到期自动关闭。": "Locks egress to a single lane and blocks rotation, for diagnosing 'more egress, more chaos'. Turns itself off at expiry.",
+    "自动关闭（分钟）": "Auto-off (minutes)", "间隔（小时）": "Interval (hours)",
+    "安静时段开始": "Quiet hours start", "安静时段结束": "Quiet hours end",
+    "ip-abuse 时轮换": "Rotate on ip-abuse", "ip-abuse 时重启农场": "Restart farm on ip-abuse",
+    "保存维护设置": "Save maintenance settings", "Webhook 通知": "Webhook notifications",
+    "未配置": "Not configured", "已配置": "Configured",
+    "（Discord/Telegram/generic）后，事故自动推送；去重 5 分钟、每分钟最多 10 条。": "(Discord/Telegram/generic); incidents are pushed automatically, deduped for 5 minutes, at most 10 per minute.",
+    "发送测试通知": "Send test notification", "运行自检": "Run self-test", "未运行": "Not running",
+    "按「运行自检」执行，可能需要 1–2 分钟。": "Press 'Run self-test'; this may take 1–2 minutes.",
+    "已去敏": "Redacted", "下载诊断 ZIP": "Download diagnostic ZIP",
+    "打包健康状态、配置、代理池、用量与日志，自动抹去 token、API key、密码和 prompt 内容。": "Bundles health, config, pool, usage, and logs; tokens, API keys, passwords, and prompt content are stripped automatically.",
+    "读取运维状态失败：": "Failed to read operations state:", "安全模式已开启。": "Safe mode enabled.",
+    "安全模式已关闭。": "Safe mode disabled.", "保存失败": "Save failed",
+    "维护设置已保存。": "Maintenance settings saved.", "测试通知已发送。": "Test notification sent.",
+    "发送失败：": "Send failed:", "未知错误": "Unknown error",
+    "没有可运行的自检": "No self-test available to run", "已排队": "Queued", "项…": "items…",
+    "Key 用量与 Top 消费者": "Key usage & top consumers", "模型组编辑器": "Model group editor",
     "路由诊断": "Routing Diagnostics", "事件流": "Event Stream", "暂停": "Pause", "继续": "Resume", "跳到最新": "Jump to latest",
     "出口健康": "Egress health", "按出口统计": "Per-egress stats", "模型失败分布": "Model failure breakdown",
     "最近错误": "Last error", "冷却": "Cooldown", "最后成功": "Last success", "失败率": "Fail rate", "刷新": "Refresh",
@@ -825,6 +897,173 @@ Object.assign(I18N.patch.en, {
   " 个文件，刷新页面后生效。": " file(s); refresh the page.",
 });
 
+Object.assign(I18N.patch.id, {
+  "错误分类": "Klasifikasi galat", "按出口汇总": "Agregat per egress",
+  "把上游 403/429/5xx 归类为 abuse、shape、quota、auth、server，便于判断是出口问题还是请求形态问题。": "Kelompokkan 403/429/5xx hulu sebagai abuse, shape, quota, auth, atau server untuk membedakan masalah egress dan bentuk permintaan.",
+  "分类": "Kategori", "次数": "Jumlah", "审计日志": "Log audit", "条数": "Jumlah baris",
+  "清空审计": "Kosongkan audit", "动作": "Aksi", "来源": "Sumber", "结果": "Hasil",
+  "数据保留": "Retensi data", "用量保留（天）": "Retensi pemakaian (hari)",
+  "用量上限（MB）": "Batas pemakaian (MB)", "审计保留（天）": "Retensi audit (hari)",
+  "备份保留（份）": "Retensi cadangan (berkas)", "保存": "Simpan", "立即裁剪": "Pangkas sekarang",
+  "定时备份": "Cadangan terjadwal", "间隔（小时）": "Interval (jam)", "保留份数": "Jumlah disimpan",
+  "保存设置": "Simpan pengaturan", "立即备份": "Cadangkan sekarang", "文件": "Berkas", "大小": "Ukuran", "操作": "Aksi",
+  "自动修复": "Perbaikan otomatis", "间隔（秒）": "Interval (detik)", "就绪下限（%）": "Batas bawah siap (%)",
+  "自动扩容": "Skala otomatis", "最少 lane": "Lane minimum", "最多 lane": "Lane maksimum",
+  "立即运行一轮": "Jalankan satu putaran", "通知目标": "Target notifikasi",
+  "URL 只回显主机名；留空表示保留原 URL。分级 info < warn < critical，critical 不受安静时段限制。": "URL hanya menampilkan host; kosongkan untuk mempertahankan URL lama. Level info < warn < critical; critical melewati jam tenang.",
+  "添加目标": "Tambah target", "安静开始": "Awal tenang", "安静结束": "Akhir tenang",
+  "每分钟上限": "Batas per menit", "重试次数": "Jumlah percobaan ulang", "保存目标": "Simpan target",
+  "测试首个启用目标": "Uji target aktif pertama", "名称": "Nama", "最低级别": "Level minimum",
+  "候选权重（JSON：别名 → 模型 → 1..100，数字大优先）": "Bobot kandidat (JSON: alias → model → 1..100, angka besar diprioritaskan)",
+  "模拟请求（模型或别名）": "Simulasi permintaan (model atau alias)", "模拟": "Simulasikan",
+  "输入模型或别名后按「模拟」查看实际选择与冷却原因。": "Masukkan model atau alias lalu tekan Simulasikan untuk melihat pilihan nyata dan alasan cooldown.",
+  "选中：": "Dipilih: ", "（回落，不是别名本身）": " (fallback, bukan alias itu sendiri)", "模拟失败：": "Simulasi gagal: ",
+  "还没有审计记录。": "Belum ada catatan audit.", "还没有备份。": "Belum ada cadangan.",
+  "暂无失败记录。": "Belum ada catatan gagal.", "还没有目标。按「添加目标」并填入 URL。": "Belum ada target. Tekan Tambah target lalu isi URL.",
+  "暂无动作。": "Belum ada aksi.", "已恢复：": "Dipulihkan: ", "审计已清空。": "Audit dikosongkan.",
+  "保留策略已保存。": "Kebijakan retensi disimpan.", "备份设置已保存。": "Pengaturan cadangan disimpan.",
+  "备份已创建：": "Cadangan dibuat: ", "备份失败": "Cadangan gagal", "自动修复设置已保存。": "Pengaturan perbaikan otomatis disimpan.",
+  "通知目标已保存。": "Target notifikasi disimpan.", "已跳过：": "Dilewati: ", "运行完成：": "Selesai: ",
+  "IP 滥用": "Penyalahgunaan IP", "请求形态": "Bentuk permintaan", "配额/429": "Kuota/429", "认证/403": "Auth/403", "上游 5xx": "Hulu 5xx", "其他": "Lainnya",
+  "每 10 秒突发上限（0 = 不限）": "Batas semburan per 10 detik (0 = tanpa batas)",
+  "同时在途上限（0 = 不限）": "Batas permintaan bersamaan (0 = tanpa batas)",
+  "条": "baris", "字节": "byte", "启用": "Aktif", "用量": "Pemakaian", "份": "berkas",
+  "个文件": "berkas", "恢复": "Pulihkan", "就绪": "siap", "未启用": "Tidak aktif",
+});
+Object.assign(I18N.patch.en, {
+  "错误分类": "Error classification", "按出口汇总": "Aggregated per egress",
+  "把上游 403/429/5xx 归类为 abuse、shape、quota、auth、server，便于判断是出口问题还是请求形态问题。": "Group upstream 403/429/5xx into abuse, shape, quota, auth, or server to tell egress problems from request-shape problems.",
+  "分类": "Category", "次数": "Count", "审计日志": "Audit log", "条数": "Rows",
+  "清空审计": "Clear audit", "动作": "Action", "来源": "Source", "结果": "Result",
+  "数据保留": "Data retention", "用量保留（天）": "Usage retention (days)",
+  "用量上限（MB）": "Usage cap (MB)", "审计保留（天）": "Audit retention (days)",
+  "备份保留（份）": "Backup retention (files)", "保存": "Save", "立即裁剪": "Prune now",
+  "定时备份": "Scheduled backup", "间隔（小时）": "Interval (hours)", "保留份数": "Keep count",
+  "保存设置": "Save settings", "立即备份": "Back up now", "文件": "Files", "大小": "Size", "操作": "Action",
+  "自动修复": "Auto-heal", "间隔（秒）": "Interval (seconds)", "就绪下限（%）": "Ready floor (%)",
+  "自动扩容": "Auto-scale", "最少 lane": "Min lanes", "最多 lane": "Max lanes",
+  "立即运行一轮": "Run one round", "通知目标": "Notification targets",
+  "URL 只回显主机名；留空表示保留原 URL。分级 info < warn < critical，critical 不受安静时段限制。": "URLs show host only; leave blank to keep the current URL. Levels info < warn < critical; critical bypasses quiet hours.",
+  "添加目标": "Add target", "安静开始": "Quiet start", "安静结束": "Quiet end",
+  "每分钟上限": "Per-minute cap", "重试次数": "Retries", "保存目标": "Save targets",
+  "测试首个启用目标": "Test first enabled target", "名称": "Name", "最低级别": "Minimum level",
+  "候选权重（JSON：别名 → 模型 → 1..100，数字大优先）": "Candidate weights (JSON: alias → model → 1..100, higher wins)",
+  "模拟请求（模型或别名）": "Simulate request (model or alias)", "模拟": "Simulate",
+  "输入模型或别名后按「模拟」查看实际选择与冷却原因。": "Enter a model or alias, then press Simulate to see the actual pick and cooldown reasons.",
+  "选中：": "Selected: ", "（回落，不是别名本身）": " (fallback, not the alias itself)", "模拟失败：": "Simulation failed: ",
+  "还没有审计记录。": "No audit records yet.", "还没有备份。": "No backups yet.",
+  "暂无失败记录。": "No failures recorded.", "还没有目标。按「添加目标」并填入 URL。": "No targets. Press Add target and enter a URL.",
+  "暂无动作。": "No actions yet.", "已恢复：": "Restored: ", "审计已清空。": "Audit cleared.",
+  "保留策略已保存。": "Retention policy saved.", "备份设置已保存。": "Backup settings saved.",
+  "备份已创建：": "Backup created: ", "备份失败": "Backup failed", "自动修复设置已保存。": "Auto-heal settings saved.",
+  "通知目标已保存。": "Notification targets saved.", "已跳过：": "Skipped: ", "运行完成：": "Completed: ",
+  "IP 滥用": "IP abuse", "请求形态": "Request shape", "配额/429": "Quota/429", "认证/403": "Auth/403", "上游 5xx": "Upstream 5xx", "其他": "Other",
+  "每 10 秒突发上限（0 = 不限）": "Burst cap per 10 seconds (0 = unlimited)",
+  "同时在途上限（0 = 不限）": "Concurrent in-flight cap (0 = unlimited)",
+  "条": "rows", "字节": "bytes", "启用": "Enabled", "用量": "Usage", "份": "files",
+  "个文件": "files", "恢复": "Restore", "就绪": "ready", "未启用": "Disabled",
+});
+
+// 全视图遗漏词条：概览数值、健康表、痕迹、诊断、日志、会话亲和、统计、文档、设置与无障碍属性。
+Object.assign(I18N.patch.id, {
+  "需要关注": "Perlu perhatian", "健康分": "Skor kesehatan",
+  "直接读取": "Baca langsung", "：进程、网关、出口与模型目录的当前状态。": ": status proses, gateway, egress, dan katalog model saat ini.",
+  "测试别名/模型": "Uji alias/model", "发送测试": "Kirim uji",
+  "目录状态": "Status katalog", "近期": "Terbaru", "正常": "Normal",
+  "还没有加载模型": "Belum ada model dimuat", "按刷新读取当前免费模型与目录判定。": "Tekan Segarkan untuk memuat model gratis dan status katalog saat ini.",
+  "最近请求的时间线、出口尝试与进行中请求；只保存在内存，重启即清空。": "Linimasa permintaan terbaru, percobaan egress, dan permintaan berjalan; hanya di memori dan kosong setelah restart.",
+  "过滤": "Filter", "清空痕迹": "Bersihkan jejak", "方法 / 路径": "Metode / jalur",
+  "首事件": "Event pertama", "总耗时": "Total waktu", "尝试": "Percobaan",
+  "还没有请求": "Belum ada permintaan", "收到请求后这里会出现时间线；点击一行展开瀑布。": "Linimasa muncul setelah ada permintaan; klik satu baris untuk membuka waterfall.",
+  "还没有出口数据": "Belum ada data egress", "请求经过出口后在这里按出口统计成功、429、abuse 与首事件耗时。": "Setelah permintaan melewati egress, di sini dirangkum sukses, 429, abuse, dan waktu event pertama per egress.",
+  "耗时": "Durasi",
+  "查看当前网关向上游发送的形态摘要（工具、头、锚点）以及最近一次拒绝原因；不含任何消息内容。": "Lihat ringkasan bentuk permintaan gateway ke hulu (tool, header, anchor) dan alasan penolakan terakhir; tanpa isi pesan apa pun.",
+  "读取形态": "Baca bentuk", "点击「读取形态」。": "Tekan Baca bentuk.",
+  "全部级别": "Semua level", "暂停自动刷新": "Jeda muat otomatis", "下载日志": "Unduh log",
+  "会话亲和 / Prompt Cache": "Afinitas sesi / Prompt Cache",
+  "每个上游会话最近一次使用的出口。同一会话固定出口可提高上游 prompt-cache 命中；这里仅观察，不改变路由。": "Egress terakhir tiap sesi hulu. Egress tetap per sesi menaikkan hit prompt-cache hulu; di sini hanya observasi, routing tidak diubah.",
+  "会话": "Sesi", "空闲": "Menganggur", "还没有会话。收到请求后出现。": "Belum ada sesi. Muncul setelah ada permintaan.",
+  "按尺寸扩容并重启": "Perbesar sesuai ukuran lalu restart",
+  "错误与限流（实时）": "Galat dan limit laju (langsung)", "429 占比": "Porsi 429",
+  "出口换线": "Pergantian egress", "模型切换": "Pergantian model",
+  "首事件 p50": "Event pertama p50", "占比": "Porsi",
+  "三个协议端点": "Tiga endpoint protokol", "Python 与 JavaScript": "Python dan JavaScript",
+  "官方 SDK": "SDK resmi", "接入注意": "Catatan integrasi", "协议差异": "Perbedaan protokol",
+  "Klien OpenAI 兼容 memakai": "Klien kompatibel OpenAI memakai",
+  "分钟": "menit", "今日": "Hari ini",
+  "还没有 key 用量。设置 API key 并发起请求后出现。": "Belum ada pemakaian key. Muncul setelah API key diatur dan ada permintaan.",
+  "Top 消费者": "Konsumen teratas", "24 小时内没有请求。": "Tidak ada permintaan dalam 24 jam.",
+  "指标 /metrics": "Metrik /metrics", "预览恢复差异": "Pratinjau selisih pemulihan",
+  "顺序即优先级": "Urutan adalah prioritas", "别名": "Alias", "加入": "Tambahkan",
+  "还没有模型组。填别名与模型后按「加入」。": "Belum ada grup model. Isi alias dan model lalu tekan Tambahkan.",
+  "默认 reasoning effort": "Reasoning effort default", "不设置": "Tidak diatur",
+  "按模型覆盖（JSON：模型 → 级别）": "Override per model (JSON: model → level)",
+  "历史快照（保存前自动创建，最多 10 份）": "Snapshot riwayat (dibuat otomatis sebelum simpan, maksimal 10)",
+  "还没有快照。": "Belum ada snapshot.",
+  "子页面": "Subhalaman", "打开 /health": "Buka /health",
+  "例：deepseek-flash 或模型组别名": "Contoh: deepseek-flash atau alias grup model",
+  "状态 / 模型 / 出口 / id": "status / model / egress / id",
+  "网关事件流": "Aliran event gateway", "日志行数": "Jumlah baris log",
+  "过滤关键字": "Kata kunci filter", "过滤日志关键字": "Kata kunci filter log",
+  "日志级别": "Level log", "分类维度": "Dimensi kategori", "流量指标": "Metrik lalu lintas",
+  "例：cepat": "Contoh: cepat", "例：deepseek-v4.1-flash-free": "Contoh: deepseek-v4.1-flash-free",
+  "采样窗口：最近请求痕迹。": "Jendela sampel: jejak permintaan terbaru.",
+  "保存在本机状态目录的": "Disimpan di direktori status lokal ",
+  "（权限 0600）。保存后立即生效，无需重启。": " (izin 0600). Berlaku langsung setelah disimpan, tanpa restart.",
+  "切换到浅色主题": "Ganti ke tema terang",
+  "超时": "Timeout", "换出": "Ganti egress", "换出口": "Ganti egress", "开始": "Mulai",
+  "p50 首事件": "p50 event pertama", "p95 首事件": "p95 event pertama",
+});
+Object.assign(I18N.patch.en, {
+  "需要关注": "Needs attention", "健康分": "Health score",
+  "直接读取": "Read directly", "：进程、网关、出口与模型目录的当前状态。": ": current state of the process, gateway, egress, and model catalog.",
+  "测试别名/模型": "Test alias/model", "发送测试": "Send test",
+  "目录状态": "Catalog status", "近期": "Recent", "正常": "OK",
+  "还没有加载模型": "No models loaded yet", "按刷新读取当前免费模型与目录判定。": "Press Refresh to load current free models and catalog verdicts.",
+  "最近请求的时间线、出口尝试与进行中请求；只保存在内存，重启即清空。": "Timeline of recent requests, egress attempts, and in-flight requests; memory only, cleared on restart.",
+  "过滤": "Filter", "清空痕迹": "Clear traces", "方法 / 路径": "Method / path",
+  "首事件": "First event", "总耗时": "Total time", "尝试": "Attempts",
+  "还没有请求": "No requests yet", "收到请求后这里会出现时间线；点击一行展开瀑布。": "The timeline appears after a request; click a row to open the waterfall.",
+  "还没有出口数据": "No egress data yet", "请求经过出口后在这里按出口统计成功、429、abuse 与首事件耗时。": "After requests pass through egress, successes, 429s, abuse, and first-event latency are summarized per egress here.",
+  "耗时": "Duration",
+  "查看当前网关向上游发送的形态摘要（工具、头、锚点）以及最近一次拒绝原因；不含任何消息内容。": "See the request-shape summary the gateway sends upstream (tools, headers, anchors) and the latest rejection reason; no message content.",
+  "读取形态": "Read shape", "点击「读取形态」。": "Press Read shape.",
+  "全部级别": "All levels", "暂停自动刷新": "Pause auto-refresh", "下载日志": "Download logs",
+  "会话亲和 / Prompt Cache": "Session affinity / Prompt Cache",
+  "每个上游会话最近一次使用的出口。同一会话固定出口可提高上游 prompt-cache 命中；这里仅观察，不改变路由。": "The egress each upstream session used last. A fixed egress per session improves upstream prompt-cache hits; this view only observes and does not change routing.",
+  "会话": "Session", "空闲": "Idle", "还没有会话。收到请求后出现。": "No sessions yet. They appear after requests arrive.",
+  "按尺寸扩容并重启": "Resize and restart",
+  "错误与限流（实时）": "Errors and rate limits (live)", "429 占比": "429 share",
+  "出口换线": "Egress switches", "模型切换": "Model switches",
+  "首事件 p50": "First event p50", "占比": "Share",
+  "三个协议端点": "Three protocol endpoints", "Python 与 JavaScript": "Python and JavaScript",
+  "官方 SDK": "Official SDK", "接入注意": "Integration notes", "协议差异": "Protocol differences",
+  "Klien OpenAI 兼容 memakai": "OpenAI-compatible clients use",
+  "分钟": "minutes", "今日": "Today",
+  "还没有 key 用量。设置 API key 并发起请求后出现。": "No key usage yet. It appears after you set an API key and send a request.",
+  "Top 消费者": "Top consumers", "24 小时内没有请求。": "No requests in the last 24 hours.",
+  "指标 /metrics": "Metrics /metrics", "预览恢复差异": "Preview restore diff",
+  "顺序即优先级": "Order is priority", "别名": "Alias", "加入": "Add",
+  "还没有模型组。填别名与模型后按「加入」。": "No model groups yet. Enter an alias and model, then press Add.",
+  "默认 reasoning effort": "Default reasoning effort", "不设置": "Not set",
+  "按模型覆盖（JSON：模型 → 级别）": "Per-model override (JSON: model → level)",
+  "历史快照（保存前自动创建，最多 10 份）": "History snapshots (created automatically before saving, max 10)",
+  "还没有快照。": "No snapshots yet.",
+  "子页面": "Subpage", "打开 /health": "Open /health",
+  "例：deepseek-flash 或模型组别名": "Example: deepseek-flash or a model-group alias",
+  "状态 / 模型 / 出口 / id": "status / model / egress / id",
+  "网关事件流": "Gateway event stream", "日志行数": "Log line count",
+  "过滤关键字": "Filter keyword", "过滤日志关键字": "Filter log keyword",
+  "日志级别": "Log level", "分类维度": "Category dimension", "流量指标": "Traffic metric",
+  "例：cepat": "Example: cepat", "例：deepseek-v4.1-flash-free": "Example: deepseek-v4.1-flash-free",
+  "采样窗口：最近请求痕迹。": "Sampling window: recent request traces.",
+  "保存在本机状态目录的": "Saved in the local state directory ",
+  "（权限 0600）。保存后立即生效，无需重启。": " (mode 0600). Takes effect immediately after saving, no restart needed.",
+  "切换到浅色主题": "Switch to light theme",
+  "超时": "Timeout", "换出": "Egress swap", "换出口": "Egress swaps", "开始": "Start",
+  "p50 首事件": "p50 first event", "p95 首事件": "p95 first event",
+});
+
 let panelLang = "id";
 let currentView = "overview";
 const langRecords = [];
@@ -923,6 +1162,20 @@ function translatePattern(text) {
   if ((m = text.match(/^读取配置失败：(.*)$/))) return (id ? "Gagal membaca konfigurasi: " : "Failed to read config: ") + m[1];
   if ((m = text.match(/^模型组 JSON 无效：(.*)$/))) return (id ? "JSON grup model tidak valid: " : "Invalid model-groups JSON: ") + m[1];
   if ((m = text.match(/^(\\d+) 行$/))) return m[1] + (id ? " baris" : " lines");
+  if ((m = text.match(/^(\\d+) 条（共 (\\d+)）$/))) return id ? m[1] + " dari " + m[2] : m[1] + " of " + m[2];
+  if ((m = text.match(/^进行中：(\\d+)$/))) return (id ? "Berjalan: " : "In flight: ") + m[1];
+  if ((m = text.match(/^(\\d+) \\/ (\\d+) 行$/))) return id ? m[1] + " / " + m[2] + " baris" : m[1] + " / " + m[2] + " lines";
+  if ((m = text.match(/^(\\d+) 会话 · TTL ([\\d.]+) 秒$/))) return id ? m[1] + " sesi · TTL " + m[2] + " detik" : m[1] + " sessions · TTL " + m[2] + " s";
+  if ((m = text.match(/^(\\d+) sessions · TTL ([\\d.]+) 秒$/))) return id ? m[1] + " sesi · TTL " + m[2] + " detik" : m[1] + " sessions · TTL " + m[2] + " s";
+  if ((m = text.match(/^(\\d+) 会话 · TTL (.+)$/))) return id ? m[1] + " sesi · TTL " + m[2] : m[1] + " sessions · TTL " + m[2];
+  if ((m = text.match(/^首事件 (.*?) · 总耗时 (.*?) · 尝试 (\\d+) · 换出口 (\\d+)$/)))
+    return id
+      ? "Event pertama " + m[1] + " · total " + m[2] + " · percobaan " + m[3] + " · ganti egress " + m[4]
+      : "First event " + m[1] + " · total " + m[2] + " · attempts " + m[3] + " · egress swaps " + m[4];
+  if ((m = text.match(/^基于最近 (\\d+) 条请求痕迹；重启清零。$/))) return id ? "Berdasarkan " + m[1] + " jejak permintaan terakhir; kosong setelah restart." : "Based on the last " + m[1] + " request traces; cleared on restart.";
+  if ((m = text.match(/^(\\d+) 分钟$/))) return m[1] + (id ? " menit" : " min");
+  if ((m = text.match(/^最近 (\\d+) 条$/))) return (id ? "Terbaru " : "Last ") + m[1];
+  if ((m = text.match(/^(\\d+) 份$/))) return m[1] + (id ? " berkas" : " files");
   return null;
 }
 
@@ -1074,14 +1327,17 @@ function go(view, opts) {
   $("crumb").textContent = tr(VIEWS[view]);
   document.title = tr(VIEWS[view]) + " · Fucking Opencode";
   if (view === "overview") loadOverviewMetrics();
-  else if (view === "health") loadHealthView();
+  else if (view === "health") { loadHealthView(); loadModelHealth(); }
+  else if (view === "trace") loadTraceView();
+  else if (view === "ops") loadOpsView();
   else if (view === "diag") 载入路由诊断();
   else if (view === "events") 载入事件流();
   else if (view === "stats") {
     const btn = $("stats-load");
     if (btn) btn.click();
+    loadUsageHealth();
   }
-  else if (view === "egress") 载入WARP();
+  else if (view === "egress") { 载入WARP(); loadSessions(); }
   else if (view === "warpfarm") loadFarm();
   else if (view === "logs") 载入日志();
   else if (view === "docs") loadDocs();
@@ -1089,6 +1345,7 @@ function go(view, opts) {
   else if (view === "settings") {
     loadSettings();
     loadConfigEditor();
+    loadKeyUsage();
   }
   if (options.hash !== false && location.hash !== "#" + view) history.replaceState(null, "", "#" + view);
   closePalette();
@@ -1401,6 +1658,33 @@ function renderStatus(state) {
 
   renderPoolFacts(state.pool);
   renderPoolList(state.pool);
+  renderPoolCooling();
+}
+
+async function renderPoolCooling() {
+  const box = $("pool-cooling");
+  if (!box) return;
+  try {
+    const farm = await readJson(await fetch("/api/warp-farm"));
+    const now = Date.now();
+    const rows = (Array.isArray(farm.coolingBlocks) ? farm.coolingBlocks : []).filter(
+      (row) => row && row.until > now
+    );
+    if (rows.length === 0) {
+      box.hidden = true;
+      box.textContent = "";
+      return;
+    }
+    box.textContent =
+      rows.length +
+      " blok egress masih cooldown (tidak dipakai): " +
+      rows
+        .map((row) => row.block + " (" + Math.ceil((row.until - now) / 60000) + "m)")
+        .join(", ");
+    box.hidden = false;
+  } catch {
+    box.hidden = true;
+  }
 }
 
 function readPoolInput() {
@@ -2420,6 +2704,7 @@ async function loadOverviewMetrics() {
     $("kpi-models").textContent = "-";
     $("kpi-models-sub").textContent = "读取失败";
   }
+  loadOverviewHealth();
 }
 
 // ---- 健康检查 ----
@@ -2564,13 +2849,20 @@ async function loadDocs() {
   if (authOpenai) authOpenai.textContent = "Authorization: Bearer " + key;
   if (authAnthropic) authAnthropic.textContent = "x-api-key: " + key;
 
-  const openaiBody = JSON.stringify({ model: model, messages: [{ role: "user", content: "你好" }] });
-  const anthropicBody = JSON.stringify({ model: model, max_tokens: 256, messages: [{ role: "user", content: "你好" }] });
+  const openaiBody = JSON.stringify({ model: model, messages: [{ role: "user", content: "Halo" }] });
+  const responsesBody = JSON.stringify({ model: model, input: "Halo" });
+  const anthropicBody = JSON.stringify({ model: model, max_tokens: 256, messages: [{ role: "user", content: "Halo" }] });
   const openaiCurl = [
     "curl " + base + "/chat/completions \\\\",
     '  -H "Authorization: Bearer ' + key + '" \\\\',
     '  -H "Content-Type: application/json" \\\\',
     "  -d '" + openaiBody + "'",
+  ].join("\\n");
+  const responsesCurl = [
+    "curl " + base + "/responses \\\\",
+    '  -H "Authorization: Bearer ' + key + '" \\\\',
+    '  -H "Content-Type: application/json" \\\\',
+    "  -d '" + responsesBody + "'",
   ].join("\\n");
   const anthropicCurl = [
     "curl " + base + "/messages \\\\",
@@ -2579,10 +2871,39 @@ async function loadDocs() {
     '  -H "Content-Type: application/json" \\\\',
     "  -d '" + anthropicBody + "'",
   ].join("\\n");
+  const pythonSdk = [
+    "from openai import OpenAI",
+    "",
+    'client = OpenAI(base_url="' + base + '", api_key="' + key + '")',
+    "response = client.chat.completions.create(",
+    '    model="' + model + '",',
+    '    messages=[{"role": "user", "content": "Halo"}],',
+    ")",
+    "print(response.choices[0].message.content)",
+  ].join("\\n");
+  const jsSdk = [
+    'import OpenAI from "openai";',
+    "",
+    "const client = new OpenAI({",
+    '  baseURL: "' + base + '",',
+    '  apiKey: "' + key + '",',
+    "});",
+    "const response = await client.responses.create({",
+    '  model: "' + model + '",',
+    '  input: "Halo",',
+    "});",
+    "console.log(response.output_text);",
+  ].join("\\n");
   const curlOpenai = $("docs-curl-openai");
+  const curlResponses = $("docs-curl-responses");
   const curlAnthropic = $("docs-curl-anthropic");
+  const pyOpenai = $("docs-py-openai");
+  const jsOpenai = $("docs-js-openai");
   if (curlOpenai) curlOpenai.textContent = openaiCurl;
+  if (curlResponses) curlResponses.textContent = responsesCurl;
   if (curlAnthropic) curlAnthropic.textContent = anthropicCurl;
+  if (pyOpenai) pyOpenai.textContent = pythonSdk;
+  if (jsOpenai) jsOpenai.textContent = jsSdk;
 }
 
 // ---- 测试台 ----
@@ -2826,6 +3147,8 @@ function renderKeyRows(keys) {
     const limitBits = [];
     if (entry.rpm) limitBits.push(entry.rpm + " rpm");
     if (entry.daily) limitBits.push(entry.daily + "/24h");
+    if (entry.burst) limitBits.push(entry.burst + "/10s");
+    if (entry.concurrency) limitBits.push(entry.concurrency + " concurrent");
     if (Array.isArray(entry.models) && entry.models.length) limitBits.push(entry.models.join(", "));
     if (limitBits.length) {
       const tag = document.createElement("span");
@@ -2860,6 +3183,10 @@ function renderKeyRows(keys) {
         if (rpmRaw === null) return;
         const dailyRaw = prompt(tr("24 小时请求上限（0 = 不限）"), String(entry.daily || 0));
         if (dailyRaw === null) return;
+        const burstRaw = prompt(tr("每 10 秒突发上限（0 = 不限）"), String(entry.burst || 0));
+        if (burstRaw === null) return;
+        const concRaw = prompt(tr("同时在途上限（0 = 不限）"), String(entry.concurrency || 0));
+        if (concRaw === null) return;
         const modelsRaw = prompt(
           tr("允许的模型 ID（逗号分隔；留空 = 不限）"),
           Array.isArray(entry.models) ? entry.models.join(",") : "",
@@ -2867,7 +3194,7 @@ function renderKeyRows(keys) {
         if (modelsRaw === null) return;
         const models = modelsRaw.split(",").map((s) => s.trim()).filter(Boolean);
         const saved = await savePanelSettings(
-          { updateApiKey: { id: entry.id, rpm: Number(rpmRaw) || 0, daily: Number(dailyRaw) || 0, models } },
+          { updateApiKey: { id: entry.id, rpm: Number(rpmRaw) || 0, daily: Number(dailyRaw) || 0, burst: Number(burstRaw) || 0, concurrency: Number(concRaw) || 0, models } },
           "限额已更新。",
         );
         if (saved) renderCredentials(saved);
@@ -3202,6 +3529,20 @@ $("farm-start").addEventListener("click", () => farmAction("start", {}, "已请�
 $("farm-stop").addEventListener("click", () => farmAction("stop", {}, "已停止。"));
 $("farm-restart").addEventListener("click", () => farmAction("restart", {}, "已重启。"));
 $("farm-rotate").addEventListener("click", () => farmAction("rotate", {}, "已轮换全部 lane。"));
+$("farm-resize").addEventListener("click", async () => {
+  const size = Number($("farm-size").value);
+  if (!Number.isInteger(size) || size < 1 || size > 32) {
+    showReport($("farm-settings-report"), [line("size 必须是 1..32 的整数。", "bad")]);
+    return;
+  }
+  try {
+    const out = await postJson("/api/farm/resize", { size });
+    showReport($("farm-settings-report"), [line(out.running === false ? "尺寸已保存；farm 当前未运行。" : "已按 " + size + " lane 重启。", "ok")]);
+    loadFarm();
+  } catch (err) {
+    showReport($("farm-settings-report"), [line(err.message, "bad")]);
+  }
+});
 $("farm-apply").addEventListener("click", () => farmAction("applyPool", {}, "已把 lane 写入代理池。"));
 $("farm-refresh").addEventListener("click", loadFarm);
 
@@ -3260,85 +3601,14 @@ document.addEventListener("click", async (event) => {
 // ---- 日志 ----
 let logsTimer = null;
 
-async function loadLogs() {
-  const lines = Number(($("logs-lines") && $("logs-lines").value) || 200);
-  try {
-    const data = await readJson(await fetch("/api/logs?lines=" + lines));
-    const events = (data.events || []).map((e) => new Date(e.at).toLocaleTimeString("zh-CN", { hour12: false }) + " [" + (e.level || "info") + "] " + e.line);
-    $("logs-events").textContent = events.join("\\n") || "暂无事件。";
-    $("logs-events-meta").textContent = events.length + " 行";
-    $("logs-farm").textContent = farmLogText(data.farm) || "未启动。";
-  } catch (err) {
-    $("logs-events").textContent = "读取失败：" + err.message;
-    $("logs-farm").textContent = "读取失败：" + err.message;
-  }
-}
-
 function 载入日志() {
-  loadLogs();
+  loadLogsFiltered();
   if (!logsTimer) {
     logsTimer = setInterval(() => {
-      if (!document.hidden && currentView === "logs") loadLogs();
+      if (!document.hidden && currentView === "logs" && !logsState.paused) loadLogsFiltered();
     }, 3000);
   }
 }
-
-$("logs-refresh").addEventListener("click", loadLogs);
-$("logs-lines").addEventListener("change", loadLogs);
-
-// ---- 运行配置编辑 ----
-async function loadConfigEditor() {
-  try {
-    const snap = await readJson(await fetch("/api/config"));
-    const values = snap.values || {};
-    $("cfg-default-model").value = values.defaultModel || "";
-    $("cfg-timeout").value = values.upstreamTimeoutMs != null ? String(values.upstreamTimeoutMs) : "";
-    $("cfg-maxbody").value = values.maxBodyBytes != null ? String(values.maxBodyBytes) : "";
-    $("cfg-autoupdate").value = values.autoUpdate ? "true" : "false";
-    $("cfg-model-groups").value = Object.keys(values.modelGroups || {}).length ? JSON.stringify(values.modelGroups, null, 2) : "";
-    $("cfg-file").textContent = snap.file || "";
-    if (snap.error) showReport($("cfg-report"), [line(snap.error, "bad")]);
-  } catch (err) {
-    showReport($("cfg-report"), [line("读取配置失败：" + err.message, "bad")]);
-  }
-}
-
-$("cfg-save").addEventListener("click", async () => {
-  const timeout = Number($("cfg-timeout").value);
-  const maxBody = Number($("cfg-maxbody").value);
-  if (!Number.isFinite(timeout) || !Number.isFinite(maxBody)) {
-    showReport($("cfg-report"), [line("超时与请求体上限必须是数字。", "bad")]);
-    return;
-  }
-  let groups = {};
-  const raw = $("cfg-model-groups").value.trim();
-  if (raw) {
-    try {
-      groups = JSON.parse(raw);
-    } catch (err) {
-      showReport($("cfg-report"), [line("模型组 JSON 无效：" + err.message, "bad")]);
-      return;
-    }
-  }
-  const button = $("cfg-save");
-  button.disabled = true;
-  try {
-    const body = await postJson("/api/config", {
-      defaultModel: $("cfg-default-model").value.trim(),
-      upstreamTimeoutMs: timeout,
-      maxBodyBytes: maxBody,
-      autoUpdate: $("cfg-autoupdate").value === "true",
-      modelGroups: groups,
-    });
-    showReport($("cfg-report"), [line("配置已保存并生效。", "ok")]);
-    if (body.snapshot) $("cfg-file").textContent = body.snapshot.file || "";
-    loadSettings();
-  } catch (err) {
-    showReport($("cfg-report"), [line(err.message, "bad")]);
-  } finally {
-    button.disabled = false;
-  }
-});
 
 // ---- 额度摘要 ----
 async function 载入额度() {
@@ -3360,6 +3630,1199 @@ async function 载入额度() {
     fillKv(box, [["读取失败", err.message]]);
   }
 }
+
+// ---- 观测：概览横幅 ----
+function obsTone(status) {
+  const n = Number(status) || 0;
+  if (n >= 200 && n < 300) return "ok";
+  if (n === 429) return "warn";
+  return "bad";
+}
+
+async function loadOverviewHealth() {
+  const banner = $("ov-incident");
+  if (!banner) return;
+  try {
+    const data = await readJson(await fetch("/api/observability"));
+    const health = data.health || { score: 100, reasons: [] };
+    const alerts = Array.isArray(data.alerts) ? data.alerts : [];
+    const items = alerts.map((a) => a.text).concat((health.reasons || []).filter((r) => !alerts.some((a) => String(a.text).includes(r))));
+    $("ov-score").firstChild.nodeValue = String(health.score == null ? "-" : health.score);
+    const scoreEl = $("ov-score");
+    scoreEl.setAttribute("data-tone", health.level === "green" ? "ok" : health.level === "red" ? "bad" : "warn");
+    const list = $("ov-incident-list");
+    list.replaceChildren();
+    if (!items.length) {
+      banner.hidden = true;
+      return;
+    }
+    for (const text of items.slice(0, 8)) {
+      const li = document.createElement("li");
+      li.textContent = text;
+      list.append(li);
+    }
+    banner.dataset.severity = health.level === "red" || alerts.some((a) => a.severity === "error") ? "error" : "warn";
+    banner.hidden = false;
+  } catch (err) {
+    banner.hidden = true;
+  }
+}
+
+// ---- 观测：请求追踪 ----
+let traceRows = [];
+let traceFilter = "";
+
+function traceMatches(row) {
+  if (!traceFilter) return true;
+  const hay = [row.id, row.model, row.egress, row.status, row.protocol].join(" ").toLowerCase();
+  return hay.includes(traceFilter);
+}
+
+function waterfallNodes(rec, now) {
+  const box = document.createElement("div");
+  box.className = "waterfall";
+  const base = rec.at || now;
+  const end = rec.endedAt || (rec.ms != null ? base + rec.ms : now);
+  const span = Math.max(1, end - base);
+  const points = [{ at: base, kind: "start", label: "开始" }];
+  (rec.events || []).forEach((ev) => points.push({ at: ev.at, kind: ev.kind || "event", label: (ev.kind || "event") + (ev.exit ? " · " + ev.exit : "") + (ev.reason ? " · " + ev.reason : "") }));
+  points.forEach((point) => {
+    const lineNode = document.createElement("div");
+    lineNode.className = "wf-line";
+    const label = document.createElement("span");
+    label.textContent = point.label;
+    label.title = point.label;
+    const bar = document.createElement("div");
+    bar.className = "wf-bar";
+    const fill = document.createElement("span");
+    const offset = Math.max(0, Math.min(100, ((point.at - base) / span) * 100));
+    fill.style.left = offset + "%";
+    fill.style.width = "2px";
+    if (point.kind === "fail" || point.kind === "error") fill.dataset.kind = "fail";
+    else if (point.kind === "swap") fill.dataset.kind = "swap";
+    else if (point.kind === "first") fill.dataset.kind = "first";
+    bar.append(fill);
+    const time = document.createElement("span");
+    time.className = "wf-time";
+    time.textContent = "+" + Math.max(0, point.at - base) + "ms";
+    lineNode.append(label, bar, time);
+    box.append(lineNode);
+  });
+  const first = document.createElement("p");
+  first.className = "hint";
+  first.textContent = "首事件 " + (rec.firstEventMs == null ? "-" : rec.firstEventMs + "ms") + " · 总耗时 " + (rec.ms == null ? "进行中" : rec.ms + "ms") + " · 尝试 " + ((rec.attempts || []).length) + " · 换出口 " + (rec.exitSwaps || 0);
+  box.append(first);
+  return box;
+}
+
+function renderTraceTable() {
+  const table = $("trace-table");
+  const body = table.querySelector("tbody");
+  body.replaceChildren();
+  const rows = traceRows.filter(traceMatches);
+  table.hidden = rows.length === 0;
+  $("trace-empty").hidden = rows.length > 0;
+  for (const rec of rows.slice(0, 120)) {
+    const tr = document.createElement("tr");
+    tr.className = "trace-row";
+    tr.tabIndex = 0;
+    const cells = [
+      fmtTime(rec.at),
+      (rec.protocol || "openai") + " · " + (rec.stream ? "stream" : "json"),
+      rec.model || "-",
+    ];
+    cells.forEach((text) => {
+      const td = document.createElement("td");
+      td.textContent = text;
+      tr.append(td);
+    });
+    const statusTd = document.createElement("td");
+    const tag = document.createElement("span");
+    tag.className = "diag-tag";
+    tag.dataset.tone = rec.status == null ? "warn" : obsTone(rec.status);
+    tag.textContent = rec.status == null ? "进行中" : String(rec.status);
+    statusTd.append(tag);
+    tr.append(statusTd);
+    [rec.egress || "-", rec.firstEventMs == null ? "-" : fmtMs(rec.firstEventMs), rec.ms == null ? "-" : fmtMs(rec.ms), String((rec.attempts || []).length)].forEach((text, i) => {
+      const td = document.createElement("td");
+      if (i > 0) td.className = "num mono";
+      td.textContent = text;
+      tr.append(td);
+    });
+    const toggle = () => {
+      const next = tr.nextElementSibling;
+      if (next && next.classList.contains("detail-panel")) {
+        next.remove();
+        tr.setAttribute("aria-expanded", "false");
+        return;
+      }
+      const detail = document.createElement("tr");
+      detail.className = "detail-panel";
+      const td = document.createElement("td");
+      td.colSpan = 8;
+      td.append(waterfallNodes(rec, Date.now()));
+      detail.append(td);
+      tr.after(detail);
+      tr.setAttribute("aria-expanded", "true");
+    };
+    tr.addEventListener("click", toggle);
+    tr.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        toggle();
+      }
+    });
+    body.append(tr);
+  }
+  $("trace-meta").textContent = rows.length + " 条（共 " + traceRows.length + "）";
+}
+
+function renderExitBoard(exits) {
+  const box = $("exit-board");
+  if (!exits || !exits.length) {
+    setEmpty(box, "还没有出口数据", "请求经过出口后在这里按出口统计成功、429、abuse 与首事件耗时。");
+    return;
+  }
+  const table = document.createElement("table");
+  table.className = "mini-table";
+  const head = document.createElement("tr");
+  ["出口", "尝试", "成功", "失败", "429", "abuse", "5xx", "超时", "换出", "p50 首事件", "p95 首事件", "最近错误"].forEach((text) => {
+    const th = document.createElement("th");
+    th.textContent = text;
+    head.append(th);
+  });
+  table.append(head);
+  for (const row of exits.slice(0, 40)) {
+    const tr = document.createElement("tr");
+    [row.exit, row.attempts, row.success, row.errors, row.status429, row.statusAbuse, row.status5xx, row.timeouts, row.swaps, row.p50FirstEvent == null ? "-" : fmtMs(row.p50FirstEvent), row.p95FirstEvent == null ? "-" : fmtMs(row.p95FirstEvent), row.lastError || "-"].forEach((value) => {
+      const td = document.createElement("td");
+      td.textContent = String(value);
+      tr.append(td);
+    });
+    table.append(tr);
+  }
+  box.replaceChildren(table);
+}
+
+async function loadTraceView() {
+  try {
+    const data = await readJson(await fetch("/api/observability"));
+    traceRows = Array.isArray(data.requests) ? data.requests : [];
+    const inflight = Array.isArray(data.inflight) ? data.inflight : [];
+    $("trace-inflight").textContent = "进行中：" + inflight.length + (inflight.length ? " · " + inflight.map((row) => (row.model || "?") + " (" + Math.round(row.ageMs / 1000) + "s)").join(", ") : "");
+    renderTraceTable();
+    renderExitBoard(data.exits || []);
+  } catch (err) {
+    showReport($("trace-empty"), [line("读取追踪失败：" + err.message, "bad")]);
+  }
+}
+
+$("trace-refresh").addEventListener("click", loadTraceView);
+$("trace-filter").addEventListener("input", (event) => {
+  traceFilter = String(event.target.value || "").trim().toLowerCase();
+  renderTraceTable();
+});
+$("trace-clear").addEventListener("click", async () => {
+  try {
+    await postJson("/api/observability/clear", {});
+    traceRows = [];
+    renderTraceTable();
+    renderExitBoard([]);
+    loadOverviewHealth();
+  } catch (err) {
+    showReport($("trace-empty"), [line(err.message, "bad")]);
+  }
+});
+
+// ---- 会话亲和 ----
+async function loadSessions() {
+  try {
+    const data = await readJson(await fetch("/api/sessions"));
+    const rows = Array.isArray(data.sessions) ? data.sessions : [];
+    const table = $("session-table");
+    const body = table.querySelector("tbody");
+    body.replaceChildren();
+    table.hidden = rows.length === 0;
+    $("session-empty").hidden = rows.length > 0;
+    for (const row of rows.slice(0, 100)) {
+      const tr = document.createElement("tr");
+      [row.session || row.hash || "-", row.egress || "direct", row.ageMs == null ? "-" : fmtMs(row.ageMs), row.ttlMs == null ? "-" : fmtMs(row.ttlMs)].forEach((text, i) => {
+        const td = document.createElement("td");
+        if (i > 1) td.className = "num mono";
+        td.textContent = text;
+        tr.append(td);
+      });
+      body.append(tr);
+    }
+    $("session-meta").textContent = rows.length + " 会话 · TTL " + (rows[0] && rows[0].ttlMs ? fmtMs(rows[0].ttlMs) : "-");
+  } catch (err) {
+    $("session-empty").textContent = "读取失败：" + err.message;
+  }
+}
+
+$("session-refresh").addEventListener("click", loadSessions);
+
+// ---- 模型健康 ----
+let modelGroupsData = [];
+
+function renderModelHealth(payload) {
+  const groups = Array.isArray(payload.groups) ? payload.groups : [];
+  const online = Array.isArray(payload.online) ? payload.online : [];
+  const cooldowns = Array.isArray(payload.cooldowns) ? payload.cooldowns : [];
+  modelGroupsData = groups;
+  const table = $("models-table");
+  const body = table.querySelector("tbody");
+  body.replaceChildren();
+  const rows = [];
+  for (const group of groups) {
+    for (const row of group.candidates || []) {
+      rows.push({ name: group.alias + " → " + row.model, verdict: row.verdict, cooldown: row.cooldown, model: row.model, alias: group.alias });
+    }
+  }
+  for (const row of online) {
+    if (rows.some((r) => r.model === row.id)) continue;
+    rows.push({ name: row.id, verdict: row.verdict, model: row.id, alias: "" });
+  }
+  for (const row of rows) {
+    const tr = document.createElement("tr");
+    const name = document.createElement("td");
+    name.textContent = row.name;
+    const verdict = document.createElement("td");
+    const tag = document.createElement("span");
+    tag.className = "diag-tag";
+    tag.dataset.tone = row.verdict === "free" ? "ok" : row.verdict === "retired" ? "bad" : "warn";
+    tag.textContent = row.verdict || "-";
+    verdict.append(tag);
+    const cooling = document.createElement("td");
+    cooling.textContent = row.cooldown ? "冷却至 " + fmtTime(row.cooldown.until || row.cooldown.coolingUntil) : "正常";
+    const rate = document.createElement("td");
+    rate.textContent = row.cooldown ? String(row.cooldown.status429 || "-") : "-";
+    const ok = document.createElement("td");
+    ok.className = "num";
+    ok.textContent = row.cooldown ? String(row.cooldown.success || "-") : "-";
+    tr.append(name, verdict, cooling, rate, ok);
+    body.append(tr);
+  }
+  table.hidden = rows.length === 0;
+  $("models-empty").hidden = rows.length > 0;
+  if (cooldowns.length) $("models-report").hidden = true;
+}
+
+async function loadModelHealth() {
+  try {
+    const payload = await readJson(await fetch("/api/models"));
+    renderModelHealth(payload);
+  } catch (err) {
+    showReport($("models-report"), [line("读取模型失败：" + err.message, "bad")]);
+  }
+}
+
+$("models-refresh").addEventListener("click", loadModelHealth);
+$("models-test").addEventListener("click", async () => {
+  const alias = $("models-alias").value.trim();
+  if (!alias) {
+    showReport($("models-report"), [line("先填别名或模型组。", "bad")]);
+    return;
+  }
+  try {
+    const body = await postJson("/api/models/test", { alias });
+    const lines = (body.candidates || []).map((row) => line(row.model + " · " + row.verdict + (row.skipped ? " · 跳过" : " · 可用"), row.skipped ? "warn" : "ok"));
+    showReport($("models-report"), lines.length ? lines : [line("没有候选模型。", "bad")]);
+  } catch (err) {
+    showReport($("models-report"), [line(err.message, "bad")]);
+  }
+});
+
+// ---- 用量：错误与 429 ----
+async function loadUsageHealth() {
+  const kpis = $("usage-health-kpis");
+  if (!kpis) return;
+  try {
+    const data = await readJson(await fetch("/api/observability"));
+    const c = data.counters || {};
+    const total = Number(c.total) || 0;
+    const byStatus = c.byStatus || {};
+    const rate429 = total ? Math.round(((byStatus["429"] || 0) / total) * 100) : 0;
+    const fails = Object.entries(byStatus).reduce((sum, [status, count]) => (Number(status) >= 400 ? sum + count : sum), 0);
+    fillKpis(kpis, [
+      ["请求", fmtNum(total)],
+      ["429 占比", rate429 + "%"],
+      ["错误", fmtNum(fails)],
+      ["出口换线", fmtNum(c.exitSwaps)],
+      ["模型切换", fmtNum(c.modelSwitches)],
+      ["首事件 p50", data.firstEvent && data.firstEvent.p50 != null ? fmtMs(data.firstEvent.p50) : "-"],
+    ]);
+    const table = $("usage-status-table");
+    const body = table.querySelector("tbody");
+    body.replaceChildren();
+    const statuses = Object.entries(byStatus).sort((a, b) => b[1] - a[1]);
+    table.hidden = statuses.length === 0;
+    for (const [status, count] of statuses) {
+      const tr = document.createElement("tr");
+      const s = document.createElement("td");
+      s.textContent = status;
+      const n = document.createElement("td");
+      n.className = "num";
+      n.textContent = fmtNum(count);
+      const p = document.createElement("td");
+      p.className = "num";
+      p.textContent = total ? Math.round((count / total) * 100) + "%" : "-";
+      tr.append(s, n, p);
+      body.append(tr);
+    }
+    $("usage-health-note").textContent = "基于最近 " + total + " 条请求痕迹；重启清零。";
+  } catch (err) {
+    kpis.replaceChildren();
+    $("usage-health-note").textContent = "读取失败：" + err.message;
+  }
+}
+
+function fillKpis(box, rows) {
+  box.replaceChildren();
+  for (const [label, value] of rows) {
+    const card = document.createElement("div");
+    card.className = "metric";
+    const head = document.createElement("div");
+    head.className = "metric-head";
+    const lab = document.createElement("span");
+    lab.className = "metric-label";
+    lab.textContent = label;
+    head.append(lab);
+    const val = document.createElement("span");
+    val.className = "metric-value";
+    val.textContent = value;
+    card.append(head, val);
+    box.append(card);
+  }
+}
+
+$("stats-load").addEventListener("click", loadUsageHealth);
+
+// ---- 运维 ----
+let selftestTimer = null;
+let opsSafeEnabled = false;
+
+async function loadOpsView() {
+  try {
+    const [data, obs, audit, retention, backups, autoheal, notify] = await Promise.all([
+      readJson(await fetch("/api/ops")),
+      readJson(await fetch("/api/observability")).catch(() => ({})),
+      readJson(await fetch("/api/audit?limit=" + (Number($("ops-audit-limit").value) || 100))).catch(() => ({})),
+      readJson(await fetch("/api/retention")).catch(() => ({})),
+      readJson(await fetch("/api/backups")).catch(() => ({})),
+      readJson(await fetch("/api/autoheal")).catch(() => ({})),
+      readJson(await fetch("/api/notify")).catch(() => ({})),
+    ]);
+    const safe = data.safeMode || {};
+    opsSafeEnabled = Boolean(safe.enabled);
+    $("ops-safe-toggle").textContent = safe.enabled ? "关闭安全模式" : "开启安全模式";
+    const badge = $("ops-safe-state");
+    badge.textContent = safe.enabled ? tr("开启") + (safe.until ? " (" + fmtTime(safe.until) + ")" : "") : tr("关闭");
+    badge.dataset.tone = safe.enabled ? "warn" : "ok";
+    const m = data.maintenance || {};
+    $("ops-maint-enabled").value = m.enabled ? "true" : "false";
+    if (m.intervalHours != null) $("ops-maint-interval").value = String(m.intervalHours);
+    $("ops-maint-quiet-start").value = m.quietFrom || "";
+    $("ops-maint-quiet-end").value = m.quietTo || "";
+    $("ops-maint-abuse-rotate").value = m.rotateOnAbuse === false ? "false" : "true";
+    $("ops-maint-abuse-restart").value = m.restartOnAbuse ? "true" : "false";
+    const webhook = data.webhook || {};
+    $("ops-webhook-meta").textContent = webhook.configured ? tr("已配置") + " · " + (webhook.kind || "generic") : tr("未配置");
+    renderSelftestList(data.selftest);
+    renderOpsExtras({ obs, audit, retention, backups, autoheal, notify });
+  } catch (err) {
+    showReport($("ops-safe-report"), [line(tr("读取运维状态失败：") + err.message, "bad")]);
+  }
+}
+
+function renderOpsExtras(data) {
+  const obs = data.obs || {};
+  const errBody = $("ops-error-table").querySelector("tbody");
+  errBody.replaceChildren();
+  const cats = obs.errorCategories || {};
+  const names = { abuse: "IP 滥用", shape: "请求形态", quota: "配额/429", auth: "认证/403", server: "上游 5xx", other: "其他" };
+  const entries = Object.entries(cats).sort((a, b) => b[1] - a[1]);
+  if (!entries.length) {
+    const rowEl = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 2;
+    td.className = "hint";
+    td.textContent = "暂无失败记录。";
+    rowEl.append(td);
+    errBody.append(rowEl);
+  } else {
+    for (const [key, n] of entries) {
+      const rowEl = document.createElement("tr");
+      const a = document.createElement("td");
+      a.textContent = names[key] || key;
+      const b = document.createElement("td");
+      b.textContent = String(n);
+      rowEl.append(a, b);
+      errBody.append(rowEl);
+    }
+  }
+
+  const audit = data.audit || {};
+  const auditBody = $("ops-audit-table").querySelector("tbody");
+  auditBody.replaceChildren();
+  const rows = audit.entries || [];
+  $("ops-audit-meta").textContent = rows.length + " " + tr("条") + " · " + ((audit.stats && audit.stats.size) || 0) + " " + tr("字节");
+  if (!rows.length) {
+    const rowEl = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 4;
+    td.className = "hint";
+    td.textContent = "还没有审计记录。";
+    rowEl.append(td);
+    auditBody.append(rowEl);
+  } else {
+    for (const row of rows) {
+      const rowEl = document.createElement("tr");
+      const cells = [row.at ? fmtTime(Date.parse(row.at)) : "", row.action || "", row.ip || "-", row.ok === false ? "失败" : "成功"];
+      for (const text of cells) {
+        const td = document.createElement("td");
+        td.textContent = text;
+        rowEl.append(td);
+      }
+      auditBody.append(rowEl);
+    }
+  }
+
+  const ret = data.retention && data.retention.retention ? data.retention.retention : {};
+  $("ops-retention-enabled").value = ret.enabled ? "true" : "false";
+  $("ops-retention-usage-days").value = ret.usageDays != null ? String(ret.usageDays) : "30";
+  $("ops-retention-max-mb").value = ret.maxUsageMb != null ? String(ret.maxUsageMb) : "64";
+  $("ops-retention-audit-days").value = ret.auditDays != null ? String(ret.auditDays) : "90";
+  $("ops-retention-backup-keep").value = ret.backupKeep != null ? String(ret.backupKeep) : "14";
+  $("ops-retention-meta").textContent = ret.enabled ? tr("启用") + " · " + tr("用量") + " " + (ret.usageMb || 0) + " MB" : tr("未启用");
+
+  const backups = data.backups || {};
+  const bcfg = backups.backup || {};
+  $("ops-backup-enabled").value = bcfg.enabled ? "true" : "false";
+  $("ops-backup-interval").value = bcfg.intervalHours != null ? String(bcfg.intervalHours) : "24";
+  $("ops-backup-keep").value = bcfg.keep != null ? String(bcfg.keep) : "14";
+  $("ops-backup-meta").textContent = (bcfg.count || 0) + " " + tr("份");
+  const body = $("ops-backup-table").querySelector("tbody");
+  body.replaceChildren();
+  const snaps = backups.snapshots || [];
+  if (!snaps.length) {
+    const rowEl = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 4;
+    td.className = "hint";
+    td.textContent = "还没有备份。";
+    rowEl.append(td);
+    body.append(rowEl);
+  } else {
+    for (const snap of snaps) {
+      const rowEl = document.createElement("tr");
+      const cells = [fmtTime(Date.parse(snap.at)), (snap.files || []).length + " " + tr("个文件"), Math.round((snap.size || 0) / 1024) + " KB"];
+      for (const text of cells) {
+        const td = document.createElement("td");
+        td.textContent = text;
+        rowEl.append(td);
+      }
+      const act = document.createElement("td");
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = tr("恢复");
+      btn.addEventListener("click", async () => {
+        if (!window.confirm("恢复 " + snap.name + "？当前状态会被覆盖。")) return;
+        try {
+          const out = await postJson("/api/backups/restore", { name: snap.name });
+          showReport($("ops-backup-report"), [line("已恢复：" + (out.restored || []).join(", "), "ok")]);
+          loadOpsView();
+        } catch (err) {
+          showReport($("ops-backup-report"), [line(err.message, "bad")]);
+        }
+      });
+      act.append(btn);
+      rowEl.append(act);
+      body.append(rowEl);
+    }
+  }
+
+  const heal = data.autoheal && data.autoheal.autoheal ? data.autoheal.autoheal : {};
+  const hcfg = heal.settings || {};
+  $("ops-autoheal-enabled").value = hcfg.enabled ? "true" : "false";
+  $("ops-autoheal-interval").value = hcfg.intervalSec != null ? String(hcfg.intervalSec) : "30";
+  $("ops-autoheal-floor").value = hcfg.readyFloorPct != null ? String(hcfg.readyFloorPct) : "50";
+  $("ops-autoheal-autoscale").value = hcfg.autoScale ? "true" : "false";
+  $("ops-autoheal-min").value = hcfg.minLanes != null ? String(hcfg.minLanes) : "1";
+  $("ops-autoheal-max").value = hcfg.maxLanes != null ? String(hcfg.maxLanes) : "8";
+  $("ops-autoheal-meta").textContent = hcfg.enabled ? tr("启用") + " · " + tr("就绪") + " " + (heal.ready || 0) + "/" + (heal.total || 0) : tr("未启用");
+  const actions = heal.actions || [];
+  $("ops-autoheal-log").textContent = actions.length ? actions.map((row) => fmtTime(Date.parse(row.at)) + " · " + row.action + (row.detail ? " · " + row.detail : "")).join("\\n") : "暂无动作。";
+
+  const notify = data.notify && data.notify.notify ? data.notify.notify : {};
+  opsNotifyTargets = Array.isArray(notify.targets) ? notify.targets.map((row) => ({ ...row, url: "" })) : [];
+  $("ops-notify-quiet-start").value = notify.quietFrom || "";
+  $("ops-notify-quiet-end").value = notify.quietTo || "";
+  $("ops-notify-per-minute").value = notify.perMinute != null ? String(notify.perMinute) : "10";
+  $("ops-notify-retry").value = notify.retryMax != null ? String(notify.retryMax) : "1";
+  $("ops-notify-meta").textContent = notify.configured ? "已配置" : "未配置";
+  renderNotifyTargets();
+}
+
+let opsNotifyTargets = [];
+
+function renderNotifyTargets() {
+  const box = $("ops-notify-targets");
+  box.replaceChildren();
+  if (!opsNotifyTargets.length) {
+    const p = document.createElement("p");
+    p.className = "hint";
+    p.textContent = "还没有目标。按「添加目标」并填入 URL。";
+    box.append(p);
+    return;
+  }
+  opsNotifyTargets.forEach((target, index) => {
+    const row = document.createElement("div");
+    row.className = "integration-grid";
+    row.style.marginBottom = "8px";
+    const nameField = document.createElement("div");
+    nameField.className = "field";
+    const nameLabel = document.createElement("label");
+    nameLabel.textContent = "名称";
+    const name = document.createElement("input");
+    name.type = "text";
+    name.value = target.name || "";
+    name.addEventListener("input", () => { opsNotifyTargets[index].name = name.value; });
+    nameField.append(nameLabel, name);
+    const urlField = document.createElement("div");
+    urlField.className = "field";
+    const urlLabel = document.createElement("label");
+    urlLabel.textContent = "URL";
+    const url = document.createElement("input");
+    url.type = "url";
+    url.autocomplete = "off";
+    url.spellcheck = false;
+    url.placeholder = target.host ? "留空保留 " + target.host : "https://…";
+    url.addEventListener("input", () => { opsNotifyTargets[index].url = url.value; });
+    urlField.append(urlLabel, url);
+    const levelField = document.createElement("div");
+    levelField.className = "field";
+    const levelLabel = document.createElement("label");
+    levelLabel.textContent = "最低级别";
+    const level = document.createElement("select");
+    for (const value of ["info", "warn", "critical"]) {
+      const opt = document.createElement("option");
+      opt.value = value;
+      opt.textContent = value;
+      level.append(opt);
+    }
+    level.value = target.minLevel || "warn";
+    level.addEventListener("change", () => { opsNotifyTargets[index].minLevel = level.value; });
+    levelField.append(levelLabel, level);
+    const enabledField = document.createElement("div");
+    enabledField.className = "field";
+    const enabledLabel = document.createElement("label");
+    enabledLabel.textContent = "启用";
+    const enabled = document.createElement("select");
+    for (const value of ["true", "false"]) {
+      const opt = document.createElement("option");
+      opt.value = value;
+      opt.textContent = value === "true" ? "是" : "否";
+      enabled.append(opt);
+    }
+    enabled.value = target.enabled === false ? "false" : "true";
+    enabled.addEventListener("change", () => { opsNotifyTargets[index].enabled = enabled.value === "true"; });
+    enabledField.append(enabledLabel, enabled);
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.textContent = "删除";
+    remove.addEventListener("click", () => { opsNotifyTargets.splice(index, 1); renderNotifyTargets(); });
+    enabledField.append(remove);
+    row.append(nameField, urlField, levelField, enabledField);
+    box.append(row);
+  });
+}
+
+$("ops-audit-refresh").addEventListener("click", async () => {
+  const limit = Math.max(1, Math.min(500, Number($("ops-audit-limit").value) || 100));
+  try {
+    const data = await readJson(await fetch("/api/audit?limit=" + limit));
+    renderOpsExtras({ audit: data });
+  } catch (err) {
+    showReport($("ops-audit-report"), [line(err.message, "bad")]);
+  }
+});
+
+$("ops-audit-clear").addEventListener("click", async () => {
+  if (!window.confirm("清空全部审计记录？")) return;
+  try {
+    await postJson("/api/audit", { clear: true });
+    showReport($("ops-audit-report"), [line("审计已清空。", "ok")]);
+    loadOpsView();
+  } catch (err) {
+    showReport($("ops-audit-report"), [line(err.message, "bad")]);
+  }
+});
+
+$("ops-retention-save").addEventListener("click", async () => {
+  try {
+    const out = await postJson("/api/retention", {
+      enabled: $("ops-retention-enabled").value === "true",
+      usageDays: Number($("ops-retention-usage-days").value) || 30,
+      maxUsageMb: Number($("ops-retention-max-mb").value) || 64,
+      auditDays: Number($("ops-retention-audit-days").value) || 90,
+      backupKeep: Number($("ops-retention-backup-keep").value) || 14,
+    });
+    showReport($("ops-retention-report"), [line(out.ok === false ? (out.error || "保存失败") : "保留策略已保存。", out.ok === false ? "bad" : "ok")]);
+    loadOpsView();
+  } catch (err) {
+    showReport($("ops-retention-report"), [line(err.message, "bad")]);
+  }
+});
+
+$("ops-retention-run").addEventListener("click", async () => {
+  try {
+    const out = await postJson("/api/retention/run", {});
+    showReport($("ops-retention-report"), [line(out.skipped === "disabled" ? "保留策略未启用，已跳过。" : "裁剪完成：" + JSON.stringify(out.usage || {}), out.ok === false ? "bad" : "ok")]);
+    loadOpsView();
+  } catch (err) {
+    showReport($("ops-retention-report"), [line(err.message, "bad")]);
+  }
+});
+
+$("ops-backup-save").addEventListener("click", async () => {
+  try {
+    const out = await postJson("/api/backups", {
+      enabled: $("ops-backup-enabled").value === "true",
+      intervalHours: Number($("ops-backup-interval").value) || 24,
+      keep: Number($("ops-backup-keep").value) || 14,
+    });
+    showReport($("ops-backup-report"), [line(out.ok === false ? (out.error || "保存失败") : "备份设置已保存。", out.ok === false ? "bad" : "ok")]);
+    loadOpsView();
+  } catch (err) {
+    showReport($("ops-backup-report"), [line(err.message, "bad")]);
+  }
+});
+
+$("ops-backup-create").addEventListener("click", async () => {
+  try {
+    const out = await postJson("/api/backups", { create: true });
+    showReport($("ops-backup-report"), [line(out.ok ? "备份已创建：" + out.name : out.error || "备份失败", out.ok ? "ok" : "bad")]);
+    loadOpsView();
+  } catch (err) {
+    showReport($("ops-backup-report"), [line(err.message, "bad")]);
+  }
+});
+
+$("ops-autoheal-save").addEventListener("click", async () => {
+  try {
+    const out = await postJson("/api/autoheal", {
+      enabled: $("ops-autoheal-enabled").value === "true",
+      intervalSec: Number($("ops-autoheal-interval").value) || 30,
+      readyFloorPct: Number($("ops-autoheal-floor").value) || 50,
+      autoScale: $("ops-autoheal-autoscale").value === "true",
+      minLanes: Number($("ops-autoheal-min").value) || 1,
+      maxLanes: Number($("ops-autoheal-max").value) || 8,
+    });
+    showReport($("ops-autoheal-report"), [line(out.ok === false ? (out.error || "保存失败") : "自动修复设置已保存。", out.ok === false ? "bad" : "ok")]);
+    loadOpsView();
+  } catch (err) {
+    showReport($("ops-autoheal-report"), [line(err.message, "bad")]);
+  }
+});
+
+$("ops-autoheal-run").addEventListener("click", async () => {
+  try {
+    const out = await postJson("/api/autoheal/run", {});
+    showReport($("ops-autoheal-report"), [line(out.skipped ? "已跳过：" + out.skipped : "运行完成：" + JSON.stringify(out.actions || []), "ok")]);
+    loadOpsView();
+  } catch (err) {
+    showReport($("ops-autoheal-report"), [line(err.message, "bad")]);
+  }
+});
+
+$("ops-notify-add").addEventListener("click", () => {
+  opsNotifyTargets.push({ id: "", name: "", url: "", minLevel: "warn", enabled: true, host: "" });
+  renderNotifyTargets();
+});
+
+$("ops-notify-save").addEventListener("click", async () => {
+  try {
+    const out = await postJson("/api/notify", {
+      targets: opsNotifyTargets.map((row) => ({ id: row.id, name: row.name, url: row.url || "", minLevel: row.minLevel, enabled: row.enabled })),
+      quietFrom: $("ops-notify-quiet-start").value || "",
+      quietTo: $("ops-notify-quiet-end").value || "",
+      perMinute: Number($("ops-notify-per-minute").value) || 10,
+      retryMax: Number($("ops-notify-retry").value) || 0,
+    });
+    showReport($("ops-notify-report"), [line(out.ok === false ? (out.error || "保存失败") : "通知目标已保存。", out.ok === false ? "bad" : "ok")]);
+    loadOpsView();
+  } catch (err) {
+    showReport($("ops-notify-report"), [line(err.message, "bad")]);
+  }
+});
+
+$("ops-notify-test").addEventListener("click", async () => {
+  try {
+    const out = await postJson("/api/notify/test", {});
+    showReport($("ops-notify-report"), [line(out.ok ? "测试通知已发送。" : "发送失败：" + ((out.result && out.result.error) || out.error || "未知错误"), out.ok ? "ok" : "bad")]);
+  } catch (err) {
+    showReport($("ops-notify-report"), [line(err.message, "bad")]);
+  }
+});
+
+function renderSelftestList(tests) {
+  const state = $("ops-selftest-state");
+  if (!Array.isArray(tests) || !tests.length) {
+    state.textContent = "未运行";
+    return;
+  }
+  state.textContent = tests.map((t) => (t.id || "?") + ": " + (t.running ? "running" : t.ok === true ? "ok" : t.ok === false ? "exit " + t.exitCode : "idle")).join(" · ");
+  const running = tests.find((t) => t.running);
+  const latest = tests.filter((t) => t.endedAt).sort((a, b) => b.endedAt - a.endedAt)[0];
+  if (latest && !running) {
+    $("ops-selftest-output").textContent = "$ " + (latest.title || latest.id) + "\\nexit " + latest.exitCode + "\\n" + (latest.output || "").slice(-12000);
+  }
+  if (running && !selftestTimer) {
+    selftestTimer = setInterval(async () => {
+      try {
+        const data = await readJson(await fetch("/api/selftest"));
+        renderSelftestList(data.tests);
+        if (!(data.tests || []).some((t) => t.running)) {
+          clearInterval(selftestTimer);
+          selftestTimer = null;
+        }
+      } catch {
+        clearInterval(selftestTimer);
+        selftestTimer = null;
+      }
+    }, 2000);
+  }
+}
+
+$("ops-safe-toggle").addEventListener("click", async () => {
+  const enabling = !opsSafeEnabled;
+  try {
+    const minutes = Math.max(1, Math.min(1440, Number($("ops-safe-minutes").value) || 30));
+    const body = await postJson("/api/ops/safe-mode", { enabled: enabling, minutes, singleLane: true, noRotation: true, reason: "panel" });
+    showReport($("ops-safe-report"), [line(body.safeMode && body.safeMode.enabled ? "安全模式已开启。" : "安全模式已关闭。", "ok")]);
+    loadOpsView();
+  } catch (err) {
+    showReport($("ops-safe-report"), [line(err.message, "bad")]);
+  }
+});
+
+$("ops-maint-save").addEventListener("click", async () => {
+  try {
+    const body = await postJson("/api/ops/maintenance", {
+      enabled: $("ops-maint-enabled").value === "true",
+      intervalHours: Number($("ops-maint-interval").value) || 6,
+      quietFrom: $("ops-maint-quiet-start").value || "",
+      quietTo: $("ops-maint-quiet-end").value || "",
+      rotateOnAbuse: $("ops-maint-abuse-rotate").value === "true",
+      restartOnAbuse: $("ops-maint-abuse-restart").value === "true",
+    });
+    showReport($("ops-maint-report"), [line(body.ok === false ? (body.error || "保存失败") : "维护设置已保存。", body.ok === false ? "bad" : "ok")]);
+  } catch (err) {
+    showReport($("ops-maint-report"), [line(err.message, "bad")]);
+  }
+});
+
+$("ops-webhook-test").addEventListener("click", async () => {
+  try {
+    const body = await postJson("/api/ops/webhook-test", {});
+    showReport($("ops-webhook-report"), [line(body.ok ? "测试通知已发送。" : "发送失败：" + ((body.result && body.result.error) || body.error || "未知错误"), body.ok ? "ok" : "bad")]);
+  } catch (err) {
+    showReport($("ops-webhook-report"), [line(err.message, "bad")]);
+  }
+});
+
+$("ops-selftest-run").addEventListener("click", async () => {
+  try {
+    const list = await readJson(await fetch("/api/selftest"));
+    const tests = (list.tests || []).map((t) => t.id).filter(Boolean);
+    if (!tests.length) {
+      $("ops-selftest-state").textContent = "没有可运行的自检";
+      return;
+    }
+    for (const id of tests) {
+      await postJson("/api/selftest", { test: id });
+    }
+    $("ops-selftest-state").textContent = tr("已排队") + " " + tests.length + " " + tr("项…");
+    if (!selftestTimer) {
+      selftestTimer = setInterval(async () => {
+        try {
+          const data = await readJson(await fetch("/api/selftest"));
+          renderSelftestList(data.tests);
+          if (!(data.tests || []).some((t) => t.running)) {
+            clearInterval(selftestTimer);
+            selftestTimer = null;
+          }
+        } catch {
+          clearInterval(selftestTimer);
+          selftestTimer = null;
+        }
+      }, 2000);
+    }
+  } catch (err) {
+    $("ops-selftest-state").textContent = err.message;
+  }
+});
+
+// ---- 请求形态 ----
+$("diag-payload-load").addEventListener("click", async () => {
+  try {
+    const data = await readJson(await fetch("/api/diag/payload"));
+    $("diag-payload").textContent = JSON.stringify(data, null, 2);
+  } catch (err) {
+    $("diag-payload").textContent = "读取失败：" + err.message;
+  }
+});
+
+// ---- Key 用量 ----
+async function loadKeyUsage() {
+  try {
+    const data = await readJson(await fetch("/api/keys/usage"));
+    const keys = Array.isArray(data.keys) ? data.keys : [];
+    const table = $("key-usage-table");
+    const body = table.querySelector("tbody");
+    body.replaceChildren();
+    table.hidden = keys.length === 0;
+    $("key-usage-empty").hidden = keys.length > 0;
+    for (const key of keys) {
+      const tr = document.createElement("tr");
+      [key.label || "(tanpa label)", String(key.minuteUsed || 0), String(key.dayUsed || 0), String(key.requests24h || 0), String(key.errors24h || 0), key.lastUsedAt ? fmtTime(key.lastUsedAt) : "-"].forEach((text, i) => {
+        const td = document.createElement("td");
+        if (i > 0 && i < 5) td.className = "num mono";
+        td.textContent = text;
+        tr.append(td);
+      });
+      body.append(tr);
+    }
+    const top = $("top-consumers");
+    top.replaceChildren();
+    for (const row of data.totals24h || []) {
+      const li = document.createElement("li");
+      const name = document.createElement("span");
+      name.className = "gw";
+      name.textContent = row.label;
+      const count = document.createElement("span");
+      count.className = "hint";
+      count.textContent = fmtNum(row.requests24h) + " 请求 · " + fmtNum(row.errors24h) + " 错误";
+      li.append(name, count);
+      top.append(li);
+    }
+    if (!(data.totals24h || []).length) {
+      const li = document.createElement("li");
+      li.className = "hint";
+      li.textContent = "24 小时内没有请求。";
+      top.append(li);
+    }
+  } catch (err) {
+    $("key-usage-empty").textContent = "读取失败：" + err.message;
+  }
+}
+
+$("key-usage-refresh").addEventListener("click", loadKeyUsage);
+
+// ---- 配置：reasoning、组编辑器、快照 ----
+let cfgGroups = {};
+let cfgWeights = {};
+let cfgSnapshots = [];
+
+function syncGroupEditor() {
+  $("cfg-model-groups").value = Object.keys(cfgGroups).length ? JSON.stringify(cfgGroups, null, 2) : "";
+  $("cfg-group-weights").value = Object.keys(cfgWeights).length ? JSON.stringify(cfgWeights, null, 2) : "";
+  const box = $("group-editor");
+  box.replaceChildren();
+  const aliases = Object.keys(cfgGroups);
+  if (!aliases.length) {
+    const li = document.createElement("li");
+    li.className = "hint";
+    li.textContent = "还没有模型组。填别名与模型后按「加入」。";
+    box.append(li);
+    return;
+  }
+  for (const alias of aliases) {
+    const groupItem = document.createElement("li");
+    groupItem.style.flexDirection = "column";
+    groupItem.style.alignItems = "stretch";
+    const head = document.createElement("div");
+    head.style.display = "flex";
+    head.style.gap = "6px";
+    head.style.alignItems = "center";
+    const name = document.createElement("strong");
+    name.textContent = alias;
+    name.style.flex = "1 1 auto";
+    const del = document.createElement("button");
+    del.type = "button";
+    del.textContent = "删除组";
+    del.addEventListener("click", () => {
+      delete cfgGroups[alias];
+      syncGroupEditor();
+    });
+    head.append(name, del);
+    groupItem.append(head);
+    cfgGroups[alias].forEach((model, index) => {
+      const row = document.createElement("div");
+      row.className = "group-candidates";
+      const li = document.createElement("li");
+      const label = document.createElement("span");
+      label.className = "gw";
+      label.textContent = (index + 1) + ". " + model;
+      const up = document.createElement("button");
+      up.type = "button";
+      up.textContent = "↑";
+      up.disabled = index === 0;
+      up.addEventListener("click", () => {
+        const list = cfgGroups[alias];
+        [list[index - 1], list[index]] = [list[index], list[index - 1]];
+        syncGroupEditor();
+      });
+      const down = document.createElement("button");
+      down.type = "button";
+      down.textContent = "↓";
+      down.disabled = index === cfgGroups[alias].length - 1;
+      down.addEventListener("click", () => {
+        const list = cfgGroups[alias];
+        [list[index + 1], list[index]] = [list[index], list[index + 1]];
+        syncGroupEditor();
+      });
+      const rm = document.createElement("button");
+      rm.type = "button";
+      rm.textContent = "×";
+      rm.addEventListener("click", () => {
+        cfgGroups[alias].splice(index, 1);
+        if (!cfgGroups[alias].length) delete cfgGroups[alias];
+        syncGroupEditor();
+      });
+      li.append(label, up, down, rm);
+      row.append(li);
+      groupItem.append(row);
+    });
+    box.append(groupItem);
+  }
+}
+
+function renderSnapshots(list) {
+  cfgSnapshots = Array.isArray(list) ? list : [];
+  const table = $("cfg-snapshots");
+  const body = table.querySelector("tbody");
+  body.replaceChildren();
+  table.hidden = cfgSnapshots.length === 0;
+  $("cfg-snapshots-empty").hidden = cfgSnapshots.length > 0;
+  for (const snap of cfgSnapshots) {
+    const tr = document.createElement("tr");
+    const time = document.createElement("td");
+    time.textContent = fmtTime(snap.at || snap.time);
+    const source = document.createElement("td");
+    source.textContent = snap.source || "file";
+    const act = document.createElement("td");
+    act.className = "num";
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = "恢复";
+    btn.addEventListener("click", async () => {
+      try {
+        await postJson("/api/config", { restoreSnapshot: snap.id });
+        showReport($("cfg-report"), [line("已恢复快照 " + snap.id + "。", "ok")]);
+        loadConfigEditor();
+        loadSettings();
+      } catch (err) {
+        showReport($("cfg-report"), [line("恢复失败：" + err.message, "bad")]);
+      }
+    });
+    act.append(btn);
+    tr.append(time, source, act);
+    body.append(tr);
+  }
+}
+
+async function loadConfigEditor() {
+  try {
+    const snap = await readJson(await fetch("/api/config"));
+    const values = snap.values || {};
+    $("cfg-default-model").value = values.defaultModel || "";
+    $("cfg-timeout").value = values.upstreamTimeoutMs != null ? String(values.upstreamTimeoutMs) : "";
+    $("cfg-maxbody").value = values.maxBodyBytes != null ? String(values.maxBodyBytes) : "";
+    $("cfg-autoupdate").value = values.autoUpdate ? "true" : "false";
+    $("cfg-reasoning").value = values.reasoningEffort || "";
+    $("cfg-reasoning-map").value = Object.keys(values.reasoningEffortByModel || {}).length ? JSON.stringify(values.reasoningEffortByModel, null, 2) : "";
+    cfgGroups = JSON.parse(JSON.stringify(values.modelGroups || {}));
+    cfgWeights = JSON.parse(JSON.stringify(values.modelGroupWeights || {}));
+    syncGroupEditor();
+    renderSnapshots(snap.snapshots || []);
+    $("cfg-file").textContent = snap.file || "";
+    if (snap.error) showReport($("cfg-report"), [line(snap.error, "bad")]);
+  } catch (err) {
+    showReport($("cfg-report"), [line("读取配置失败：" + err.message, "bad")]);
+  }
+}
+
+$("group-add").addEventListener("click", () => {
+  const alias = $("group-alias").value.trim();
+  const model = $("group-model").value.trim();
+  if (!alias || !model) {
+    showReport($("cfg-report"), [line("别名与模型都不能为空。", "bad")]);
+    return;
+  }
+  const list = cfgGroups[alias] || [];
+  if (!list.includes(model)) list.push(model);
+  cfgGroups[alias] = list;
+  $("group-model").value = "";
+  syncGroupEditor();
+});
+
+$("cfg-model-groups").addEventListener("input", () => {
+  try {
+    const parsed = JSON.parse($("cfg-model-groups").value || "{}");
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      cfgGroups = parsed;
+      syncGroupEditor();
+    }
+  } catch {}
+});
+
+$("cfg-group-weights").addEventListener("input", () => {
+  try {
+    const parsed = JSON.parse($("cfg-group-weights").value || "{}");
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) cfgWeights = parsed;
+  } catch {}
+});
+
+$("cfg-simulate-run").addEventListener("click", async () => {
+  const model = $("cfg-simulate-model").value.trim();
+  const out = $("cfg-simulate-output");
+  if (!model) {
+    out.textContent = "先填写模型或别名。";
+    return;
+  }
+  try {
+    const data = await readJson(await fetch("/api/models/simulate?model=" + encodeURIComponent(model)));
+    const rows = (data.明细 || []).map((row) => (row.可用 ? "可用" : "冷却至 " + fmtTime(row.冷却到) + " " + (row.原因 || "")) + " · 权重 " + row.权重 + " · " + row.模型);
+    out.textContent = "选中：" + data.选中 + (data.回落 ? "（回落，不是别名本身）" : "") + "\\n" + rows.join("\\n");
+  } catch (err) {
+    out.textContent = "模拟失败：" + err.message;
+  }
+});
+
+$("cfg-save").addEventListener("click", async () => {
+  const timeout = Number($("cfg-timeout").value);
+  const maxBody = Number($("cfg-maxbody").value);
+  if (!Number.isFinite(timeout) || !Number.isFinite(maxBody)) {
+    showReport($("cfg-report"), [line("超时与请求体上限必须是数字。", "bad")]);
+    return;
+  }
+  let reasoningMap = {};
+  let weightsMap = {};
+  const rawWeights = $("cfg-group-weights").value.trim();
+  if (rawWeights) {
+    try {
+      weightsMap = JSON.parse(rawWeights);
+    } catch (err) {
+      showReport($("cfg-report"), [line("权重 JSON 无效：" + err.message, "bad")]);
+      return;
+    }
+  }
+  const rawReasoning = $("cfg-reasoning-map").value.trim();
+  if (rawReasoning) {
+    try {
+      reasoningMap = JSON.parse(rawReasoning);
+    } catch (err) {
+      showReport($("cfg-report"), [line("reasoning 覆盖 JSON 无效：" + err.message, "bad")]);
+      return;
+    }
+  }
+  const button = $("cfg-save");
+  button.disabled = true;
+  try {
+    const body = await postJson("/api/config", {
+      defaultModel: $("cfg-default-model").value.trim(),
+      upstreamTimeoutMs: timeout,
+      maxBodyBytes: maxBody,
+      autoUpdate: $("cfg-autoupdate").value === "true",
+      modelGroups: cfgGroups,
+      modelGroupWeights: weightsMap,
+      reasoningEffort: $("cfg-reasoning").value,
+      reasoningEffortByModel: reasoningMap,
+    });
+    showReport($("cfg-report"), [line("配置已保存并生效。", "ok")]);
+    if (body.snapshot) $("cfg-file").textContent = body.snapshot.file || "";
+    loadConfigEditor();
+    loadSettings();
+  } catch (err) {
+    showReport($("cfg-report"), [line(err.message, "bad")]);
+  } finally {
+    button.disabled = false;
+  }
+});
+
+// ---- 备份预览 ----
+let backupPayload = null;
+
+$("backup-preview").addEventListener("click", async () => {
+  if (!backupPayload) {
+    showReport($("backup-preview-report"), [line("先选择一个备份文件。", "bad")]);
+    return;
+  }
+  try {
+    const data = await postJson("/api/backup/preview", { files: backupPayload.files || backupPayload });
+    const lines = (data.files || []).map((row) => {
+      const parts = [];
+      if (row.diff && row.diff.added.length) parts.push("+" + row.diff.added.join(", +"));
+      if (row.diff && row.diff.removed.length) parts.push("-" + row.diff.removed.join(", -"));
+      if (row.diff && row.diff.changed.length) parts.push("~" + row.diff.changed.join(", ~"));
+      return line(row.file + "：" + (row.exists ? "已存在" : "新增") + (parts.length ? " · " + parts.join(" · ") : " · 无差异"), row.valid ? "ok" : "warn");
+    });
+    showReport($("backup-preview-report"), lines.length ? lines : [line("备份里没有可识别的文件。", "warn")]);
+  } catch (err) {
+    showReport($("backup-preview-report"), [line(err.message, "bad")]);
+  }
+});
+
+// ---- 日志过滤 ----
+const logsState = { events: [], farm: "", paused: false };
+
+function renderLogs() {
+  const search = ($("logs-search") && $("logs-search").value || "").trim().toLowerCase();
+  const level = ($("logs-level") && $("logs-level").value) || "";
+  const events = logsState.events.filter((row) => {
+    if (level && row.level !== level) return false;
+    if (search && row.text.toLowerCase().indexOf(search) === -1) return false;
+    return true;
+  });
+  $("logs-events").textContent = events.map((row) => row.text).join("\\n") || "没有匹配的日志。";
+  $("logs-events-meta").textContent = events.length + " / " + logsState.events.length + " 行";
+  const farm = logsState.farm || "未启动。";
+  $("logs-farm").textContent = search ? farm.split("\\n").filter((lineText) => lineText.toLowerCase().indexOf(search) !== -1).join("\\n") || "没有匹配的行。" : farm;
+}
+
+async function loadLogsFiltered() {
+  const lines = Number(($("logs-lines") && $("logs-lines").value) || 200);
+  try {
+    const data = await readJson(await fetch("/api/logs?lines=" + lines));
+    logsState.events = (data.events || []).map((e) => ({
+      level: e.level || "info",
+      text: new Date(e.at).toLocaleTimeString("zh-CN", { hour12: false }) + " [" + (e.level || "info") + "] " + e.line,
+    }));
+    logsState.farm = farmLogText(data.farm) || "";
+    renderLogs();
+  } catch (err) {
+    $("logs-events").textContent = "读取失败：" + err.message;
+  }
+}
+
+$("logs-refresh").addEventListener("click", loadLogsFiltered);
+$("logs-lines").addEventListener("change", loadLogsFiltered);
+$("logs-search").addEventListener("input", renderLogs);
+$("logs-level").addEventListener("change", renderLogs);
+$("logs-pause").addEventListener("change", (event) => {
+  logsState.paused = Boolean(event.target.checked);
+});
+$("logs-download").addEventListener("click", () => {
+  const text = $("logs-events").textContent + "\\n\\n--- WARP farm ---\\n" + $("logs-farm").textContent;
+  const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = "gateway-logs-" + new Date().toISOString().replace(/[:.]/g, "-") + ".txt";
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(link.href), 5000);
+});
 
 // ---- 启动 ----
 applyPrefs();
@@ -3484,6 +4947,13 @@ function renderPanel(description, { version = "", port = "", authRequired = fals
           <h1 id="overview-title">概览</h1>
           <p class="page-sub">桥的出口与网关状态。改动立即用于下一个请求，无需重启。</p>
         </div>
+        <div class="card incident-banner" id="ov-incident" data-severity="warn" hidden>
+          <div style="min-width:0;flex:1 1 320px">
+            <strong>需要关注</strong>
+            <ul id="ov-incident-list"></ul>
+          </div>
+          <div class="score-badge" id="ov-score">-<small>健康分</small></div>
+        </div>
         <div class="card status-card">
           <div class="status-mode">
             <span class="dot js-mode-dot" data-state="idle"></span>
@@ -3570,8 +5040,53 @@ function renderPanel(description, { version = "", port = "", authRequired = fals
           <div id="health-quota"><p class="hint">读取中…</p></div>
         </div>
         <div class="card">
+          <div class="card-head"><h2>模型健康</h2><span class="card-meta">/api/models</span></div>
+          <div class="toolbar">
+            <button type="button" class="primary" id="models-refresh">刷新</button>
+            <label for="models-alias" class="hint">测试别名/模型</label>
+            <input id="models-alias" type="text" autocomplete="off" spellcheck="false" placeholder="例：deepseek-flash 或模型组别名" style="width:220px">
+            <button type="button" id="models-test">发送测试</button>
+          </div>
+          <div class="report" id="models-report" role="status" aria-live="polite" hidden></div>
+          <div class="table-wrap">
+            <table class="mini-table" id="models-table" hidden>
+              <thead><tr><th scope="col">模型</th><th scope="col">目录状态</th><th scope="col">近期</th><th scope="col">429</th><th scope="col" class="num">成功</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <div id="models-empty" class="empty"><strong>还没有加载模型</strong><p>按刷新读取当前免费模型与目录判定。</p></div>
+        </div>
+        <div class="card">
           <div class="card-head"><h2>原始响应</h2><span class="card-meta">application/json</span></div>
           <pre class="code" id="health-raw">读取中…</pre>
+        </div>
+      </section>
+
+      <section class="view" data-view="trace" aria-labelledby="trace-title">
+        <div class="page-head">
+          <h1 id="trace-title">请求追踪</h1>
+          <p class="page-sub">最近请求的时间线、出口尝试与进行中请求；只保存在内存，重启即清空。</p>
+        </div>
+        <div class="card">
+          <div class="toolbar">
+            <button type="button" class="primary" id="trace-refresh">刷新</button>
+            <label for="trace-filter" class="hint">过滤</label>
+            <input id="trace-filter" type="search" autocomplete="off" placeholder="状态 / 模型 / 出口 / id" style="width:220px">
+            <button type="button" id="trace-clear">清空痕迹</button>
+            <span class="hint" id="trace-meta" style="margin-left:auto">-</span>
+          </div>
+          <div id="trace-inflight" class="hint">进行中：0</div>
+          <div class="table-wrap">
+            <table class="mini-table" id="trace-table" hidden>
+              <thead><tr><th scope="col">时间</th><th scope="col">方法 / 路径</th><th scope="col">模型</th><th scope="col">状态</th><th scope="col">出口</th><th scope="col" class="num">首事件</th><th scope="col" class="num">总耗时</th><th scope="col" class="num">尝试</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <div id="trace-empty" class="empty"><strong>还没有请求</strong><p>收到请求后这里会出现时间线；点击一行展开瀑布。</p></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>出口记分牌</h2><span class="card-meta">route attempts</span></div>
+          <div id="exit-board"><p class="hint">读取中…</p></div>
         </div>
       </section>
 
@@ -3620,6 +5135,13 @@ function renderPanel(description, { version = "", port = "", authRequired = fals
             </table>
           </div>
         </div>
+        <div class="card">
+          <div class="card-head"><h2>请求形态与锚点</h2><span class="card-meta">/api/diag/payload</span></div>
+          <p class="hint">查看当前网关向上游发送的形态摘要（工具、头、锚点）以及最近一次拒绝原因；不含任何消息内容。</p>
+          <div class="toolbar"><button type="button" class="primary" id="diag-payload-load">读取形态</button></div>
+          <div class="report" id="diag-payload-report" role="status" aria-live="polite" hidden></div>
+          <pre class="code" id="diag-payload">点击「读取形态」。</pre>
+        </div>
       </section>
 
       <section class="view" data-view="events" aria-labelledby="events-title">
@@ -3641,7 +5163,7 @@ function renderPanel(description, { version = "", port = "", authRequired = fals
           <h1 id="logs-title">日志</h1>
           <p class="page-sub">网关事件环与 WARP farm sidecar 的尾部输出，只读本机。</p>
         </div>
-        <div class="toolbar">
+        <div class="toolbar log-filter">
           <button type="button" class="primary" id="logs-refresh">刷新</button>
           <label for="logs-lines" class="hint">行数</label>
           <select id="logs-lines" aria-label="日志行数">
@@ -3649,6 +5171,15 @@ function renderPanel(description, { version = "", port = "", authRequired = fals
             <option value="200" selected>200</option>
             <option value="500">500</option>
           </select>
+          <input id="logs-search" type="search" autocomplete="off" placeholder="过滤关键字" aria-label="过滤日志关键字">
+          <select id="logs-level" aria-label="日志级别">
+            <option value="">全部级别</option>
+            <option value="error">error</option>
+            <option value="warn">warn</option>
+            <option value="info">info</option>
+          </select>
+          <label class="hint"><input type="checkbox" id="logs-pause"> 暂停自动刷新</label>
+          <button type="button" id="logs-download">下载日志</button>
         </div>
         <div class="card">
           <div class="card-head"><h2>网关</h2><span class="card-meta" id="logs-events-meta">-</span></div>
@@ -3696,6 +5227,18 @@ function renderPanel(description, { version = "", port = "", authRequired = fals
           </div>
           <div class="report" id="warp-report" role="status" aria-live="polite" hidden></div>
         </div>
+        <div class="card">
+          <div class="card-head"><h2>会话亲和 / Prompt Cache</h2><span class="card-meta" id="session-meta">/api/sessions</span></div>
+          <p class="hint">每个上游会话最近一次使用的出口。同一会话固定出口可提高上游 prompt-cache 命中；这里仅观察，不改变路由。</p>
+          <div class="toolbar"><button type="button" class="primary" id="session-refresh">刷新</button></div>
+          <div class="table-wrap">
+            <table class="mini-table" id="session-table" hidden>
+              <thead><tr><th scope="col">会话</th><th scope="col">出口</th><th scope="col" class="num">空闲</th><th scope="col" class="num">TTL</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <div id="session-empty" class="hint">还没有会话。收到请求后出现。</div>
+        </div>
       </section>
 
       <section class="view" data-view="pool" aria-labelledby="pool-title">
@@ -3729,6 +5272,7 @@ function renderPanel(description, { version = "", port = "", authRequired = fals
             <span class="card-meta" id="pool-count">-</span>
           </div>
           <ul class="pool-list" id="pool-list" hidden></ul>
+          <p class="hint" id="pool-cooling" hidden></p>
           <div class="empty" id="pool-empty">
             <strong>代理池未启用</strong>
             <p>在上方填写并保存至少一条代理后，这里会显示健康状态与冷却倒计时。</p>
@@ -3746,6 +5290,7 @@ function renderPanel(description, { version = "", port = "", authRequired = fals
             <button type="button" class="primary" id="farm-start">启动</button>
             <button type="button" id="farm-stop">停止</button>
             <button type="button" id="farm-restart">重启</button>
+            <button type="button" id="farm-resize">按尺寸扩容并重启</button>
             <button type="button" id="farm-rotate">全部轮换</button>
             <button type="button" id="farm-apply">应用到代理池</button>
             <button type="button" id="farm-refresh">刷新</button>
@@ -3877,6 +5422,17 @@ function renderPanel(description, { version = "", port = "", authRequired = fals
               <div class="usage-row-empty" id="usage-recent-empty" hidden>这个范围内还没有请求。</div>
             </div>
           </div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>错误与限流（实时）</h2><span class="card-meta">/api/observability</span></div>
+          <div class="metric-grid" id="usage-health-kpis"></div>
+          <div class="table-wrap">
+            <table class="mini-table" id="usage-status-table" hidden>
+              <thead><tr><th scope="col">状态</th><th scope="col" class="num">次数</th><th scope="col" class="num">占比</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <p class="hint" id="usage-health-note">采样窗口：最近请求痕迹。</p>
         </div>
       </section>
 
@@ -4027,11 +5583,28 @@ function renderPanel(description, { version = "", port = "", authRequired = fals
           </div>
         </div>
         <div class="card">
-          <div class="card-head"><h2>请求示例</h2><span class="card-meta">按当前 origin 生成</span></div>
-          <p class="docs-label">OpenAI chat completions（非流式）</p>
+          <div class="card-head"><h2>三个协议端点</h2><span class="card-meta">按当前 origin 生成</span></div>
+          <p class="docs-label">Chat Completions</p>
           <pre class="code" id="docs-curl-openai"></pre>
-          <p class="docs-label">Anthropic messages</p>
+          <p class="docs-label">Responses</p>
+          <pre class="code" id="docs-curl-responses"></pre>
+          <p class="docs-label">Anthropic Messages</p>
           <pre class="code" id="docs-curl-anthropic"></pre>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>Python 与 JavaScript</h2><span class="card-meta">官方 SDK</span></div>
+          <p class="docs-label">Python · OpenAI SDK</p>
+          <pre class="code" id="docs-py-openai"></pre>
+          <p class="docs-label">JavaScript · OpenAI SDK</p>
+          <pre class="code" id="docs-js-openai"></pre>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>接入注意</h2><span class="card-meta">协议差异</span></div>
+          <ul class="docs-notes">
+            <li>Klien OpenAI 兼容 memakai <code>Authorization: Bearer &lt;API_KEY&gt;</code>.</li>
+            <li>Klien Anthropic memakai <code>x-api-key</code> dan path <code>/v1/messages</code>.</li>
+            <li>Streaming tetap memakai event protokol asal; gateway mengonversi saat protokol klien dan model berbeda.</li>
+          </ul>
         </div>
       </section>
 
@@ -4101,6 +5674,19 @@ function renderPanel(description, { version = "", port = "", authRequired = fals
             <div class="report" id="cred-report" role="status" aria-live="polite" hidden></div>
           </div>
           <div class="card settings-wide">
+            <div class="card-head"><h2>Key 用量与 Top 消费者</h2><span class="card-meta" id="key-usage-meta">/api/keys/usage</span></div>
+            <div class="toolbar"><button type="button" id="key-usage-refresh">刷新</button></div>
+            <div class="table-wrap">
+              <table class="mini-table" id="key-usage-table" hidden>
+                <thead><tr><th scope="col">Key</th><th scope="col" class="num">分钟</th><th scope="col" class="num">今日</th><th scope="col" class="num">总请求</th><th scope="col" class="num">错误</th><th scope="col">最近</th></tr></thead>
+                <tbody></tbody>
+              </table>
+            </div>
+            <div id="key-usage-empty" class="hint">还没有 key 用量。设置 API key 并发起请求后出现。</div>
+            <div class="card-head" style="margin-top:14px"><h3 style="font-size:.9rem">Top 消费者</h3></div>
+            <ul class="group-candidates" id="top-consumers"></ul>
+          </div>
+          <div class="card settings-wide">
             <div class="card-head"><h2>Agent 集成</h2><span class="card-meta">OpenAI 兼容</span></div>
             <div class="integration-grid">
               <div class="field">
@@ -4127,9 +5713,11 @@ function renderPanel(description, { version = "", port = "", authRequired = fals
               <a class="btn-link" href="/metrics" target="_blank" rel="noopener">指标 /metrics</a>
               <a class="btn-link" href="/openapi.json" target="_blank" rel="noopener">OpenAPI</a>
               <button type="button" id="backup-download">下载状态备份</button>
+              <button type="button" id="backup-preview">预览恢复差异</button>
               <label class="btn-link" for="backup-file">恢复备份</label>
               <input id="backup-file" type="file" accept="application/json" hidden>
             </div>
+            <div class="report" id="backup-preview-report" role="status" aria-live="polite" hidden></div>
             <p class="cred-note">备份包含 settings.json、proxy.json、warp-farm.json、model-health.json 与 config.json；不含用量日志。</p>
             <div class="report" id="backup-report" role="status" aria-live="polite" hidden></div>
           </div>
@@ -4164,8 +5752,61 @@ function renderPanel(description, { version = "", port = "", authRequired = fals
               <label for="cfg-model-groups">模型组（JSON：别名 → 模型数组）</label>
               <textarea id="cfg-model-groups" rows="6" spellcheck="false" placeholder="{&quot;cepat&quot;: [&quot;mimo-v2.6-flash-free&quot;]}"></textarea>
             </div>
+            <div class="card-head" style="margin-top:6px"><h3 style="font-size:.9rem">模型组编辑器</h3><span class="card-meta">顺序即优先级</span></div>
+            <div class="integration-grid">
+              <div class="field">
+                <label for="group-alias">别名</label>
+                <input id="group-alias" type="text" autocomplete="off" spellcheck="false" placeholder="例：cepat">
+              </div>
+              <div class="field">
+                <label for="group-model">模型 ID</label>
+                <div class="copy-row">
+                  <input id="group-model" type="text" autocomplete="off" spellcheck="false" placeholder="例：deepseek-v4.1-flash-free">
+                  <button type="button" id="group-add">加入</button>
+                </div>
+              </div>
+            </div>
+            <ul class="group-candidates" id="group-editor"></ul>
+            <div class="field">
+              <label for="cfg-group-weights">候选权重（JSON：别名 → 模型 → 1..100，数字大优先）</label>
+              <textarea id="cfg-group-weights" rows="4" spellcheck="false" placeholder="{&quot;cepat&quot;: {&quot;mimo-v2.6-flash-free&quot;: 80}}"></textarea>
+            </div>
+            <div class="field">
+              <label for="cfg-simulate-model">模拟请求（模型或别名）</label>
+              <div class="copy-row">
+                <input id="cfg-simulate-model" type="text" autocomplete="off" spellcheck="false" placeholder="例：cepat">
+                <button type="button" id="cfg-simulate-run">模拟</button>
+              </div>
+            </div>
+            <pre class="code" id="cfg-simulate-output" role="status" aria-live="polite">输入模型或别名后按「模拟」查看实际选择与冷却原因。</pre>
+            <div class="integration-grid">
+              <div class="field">
+                <label for="cfg-reasoning">默认 reasoning effort</label>
+                <select id="cfg-reasoning">
+                  <option value="">不设置</option>
+                  <option value="minimal">minimal</option>
+                  <option value="low">low</option>
+                  <option value="medium">medium</option>
+                  <option value="high">high</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="cfg-reasoning-map">按模型覆盖（JSON：模型 → 级别）</label>
+                <textarea id="cfg-reasoning-map" rows="3" spellcheck="false" placeholder="{&quot;deepseek-v4.1-flash-free&quot;: &quot;high&quot;}"></textarea>
+              </div>
+            </div>
             <div class="actions">
               <button type="button" class="primary" id="cfg-save">保存配置</button>
+            </div>
+            <div class="field">
+              <label>历史快照（保存前自动创建，最多 10 份）</label>
+              <div class="table-wrap">
+                <table class="mini-table" id="cfg-snapshots" hidden>
+                  <thead><tr><th scope="col">时间</th><th scope="col">来源</th><th scope="col" class="num">操作</th></tr></thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+              <div id="cfg-snapshots-empty" class="hint">还没有快照。</div>
             </div>
             <p class="hint">写入 <code>config.json</code>，下一次请求生效；环境变量优先级更高时 source 显示为 env。</p>
             <div class="report" id="cfg-report" role="status" aria-live="polite" hidden></div>
@@ -4211,6 +5852,162 @@ function renderPanel(description, { version = "", port = "", authRequired = fals
             </div>
             <div class="report" id="pref-report" role="status" aria-live="polite" hidden></div>
           </div>
+        </div>
+      </section>
+
+      <section class="view" data-view="ops" aria-labelledby="ops-title">
+        <div class="page-head">
+          <h1 id="ops-title">运维</h1>
+          <p class="page-sub">安全模式、定时维护、自检与诊断包。所有动作只影响本机网关。</p>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>安全模式</h2><span class="card-meta">立即生效</span></div>
+          <p class="hint">开启后固定单条出口、禁止轮换，用于排查「出口越多越乱」的场景。到期自动关闭。</p>
+          <div class="toolbar">
+            <button type="button" class="primary" id="ops-safe-toggle">开启安全模式</button>
+            <label for="ops-safe-minutes" class="hint">自动关闭（分钟）</label>
+            <input id="ops-safe-minutes" type="number" min="1" max="1440" value="30" style="width:100px">
+            <span class="diag-tag" id="ops-safe-state" data-tone="ok">关闭</span>
+          </div>
+          <div class="report" id="ops-safe-report" role="status" aria-live="polite" hidden></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>定时维护</h2><span class="card-meta">仅空闲时执行</span></div>
+          <div class="integration-grid">
+            <div class="field">
+              <label for="ops-maint-enabled">启用</label>
+              <select id="ops-maint-enabled">
+                <option value="false">关闭</option>
+                <option value="true">开启</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="ops-maint-interval">间隔（小时）</label>
+              <input id="ops-maint-interval" type="number" min="1" max="168" value="6">
+            </div>
+            <div class="field">
+              <label for="ops-maint-quiet-start">安静时段开始</label>
+              <input id="ops-maint-quiet-start" type="time">
+            </div>
+            <div class="field">
+              <label for="ops-maint-quiet-end">安静时段结束</label>
+              <input id="ops-maint-quiet-end" type="time">
+            </div>
+            <div class="field">
+              <label for="ops-maint-abuse-rotate">ip-abuse 时轮换</label>
+              <select id="ops-maint-abuse-rotate">
+                <option value="true">开启</option>
+                <option value="false">关闭</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="ops-maint-abuse-restart">ip-abuse 时重启农场</label>
+              <select id="ops-maint-abuse-restart">
+                <option value="false">关闭</option>
+                <option value="true">开启</option>
+              </select>
+            </div>
+          </div>
+          <div class="actions"><button type="button" class="primary" id="ops-maint-save">保存维护设置</button></div>
+          <div class="report" id="ops-maint-report" role="status" aria-live="polite" hidden></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>Webhook 通知</h2><span class="card-meta" id="ops-webhook-meta">未配置</span></div>
+          <p class="hint">设置 <code>NOTIFY_WEBHOOK_URL</code> （Discord/Telegram/generic）后，事故自动推送；去重 5 分钟、每分钟最多 10 条。</p>
+          <div class="actions"><button type="button" id="ops-webhook-test">发送测试通知</button></div>
+          <div class="report" id="ops-webhook-report" role="status" aria-live="polite" hidden></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>错误分类</h2><span class="card-meta">按出口汇总</span></div>
+          <p class="hint">把上游 403/429/5xx 归类为 abuse、shape、quota、auth、server，便于判断是出口问题还是请求形态问题。</p>
+          <div class="table-wrap"><table class="table" id="ops-error-table"><thead><tr><th>分类</th><th>次数</th></tr></thead><tbody></tbody></table></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>审计日志</h2><span class="card-meta" id="ops-audit-meta">最近 100 条</span></div>
+          <div class="toolbar">
+            <label for="ops-audit-limit" class="hint">条数</label>
+            <input id="ops-audit-limit" type="number" min="1" max="500" value="100" style="width:90px">
+            <button type="button" id="ops-audit-refresh">刷新</button>
+            <button type="button" id="ops-audit-clear">清空审计</button>
+          </div>
+          <div class="table-wrap"><table class="table" id="ops-audit-table"><thead><tr><th>时间</th><th>动作</th><th>来源</th><th>结果</th></tr></thead><tbody></tbody></table></div>
+          <div class="report" id="ops-audit-report" role="status" aria-live="polite" hidden></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>数据保留</h2><span class="card-meta" id="ops-retention-meta">未启用</span></div>
+          <div class="integration-grid">
+            <div class="field"><label for="ops-retention-enabled">启用</label><select id="ops-retention-enabled"><option value="false">关闭</option><option value="true">开启</option></select></div>
+            <div class="field"><label for="ops-retention-usage-days">用量保留（天）</label><input id="ops-retention-usage-days" type="number" min="1" max="3650" value="30"></div>
+            <div class="field"><label for="ops-retention-max-mb">用量上限（MB）</label><input id="ops-retention-max-mb" type="number" min="1" max="2048" value="64"></div>
+            <div class="field"><label for="ops-retention-audit-days">审计保留（天）</label><input id="ops-retention-audit-days" type="number" min="1" max="3650" value="90"></div>
+            <div class="field"><label for="ops-retention-backup-keep">备份保留（份）</label><input id="ops-retention-backup-keep" type="number" min="1" max="100" value="14"></div>
+          </div>
+          <div class="actions">
+            <button type="button" class="primary" id="ops-retention-save">保存</button>
+            <button type="button" id="ops-retention-run">立即裁剪</button>
+          </div>
+          <div class="report" id="ops-retention-report" role="status" aria-live="polite" hidden></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>定时备份</h2><span class="card-meta" id="ops-backup-meta">0 份</span></div>
+          <div class="integration-grid">
+            <div class="field"><label for="ops-backup-enabled">启用</label><select id="ops-backup-enabled"><option value="false">关闭</option><option value="true">开启</option></select></div>
+            <div class="field"><label for="ops-backup-interval">间隔（小时）</label><input id="ops-backup-interval" type="number" min="1" max="168" value="24"></div>
+            <div class="field"><label for="ops-backup-keep">保留份数</label><input id="ops-backup-keep" type="number" min="1" max="100" value="14"></div>
+          </div>
+          <div class="actions">
+            <button type="button" class="primary" id="ops-backup-save">保存设置</button>
+            <button type="button" id="ops-backup-create">立即备份</button>
+          </div>
+          <div class="table-wrap"><table class="table" id="ops-backup-table"><thead><tr><th>时间</th><th>文件</th><th>大小</th><th>操作</th></tr></thead><tbody></tbody></table></div>
+          <div class="report" id="ops-backup-report" role="status" aria-live="polite" hidden></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>自动修复</h2><span class="card-meta" id="ops-autoheal-meta">未启用</span></div>
+          <div class="integration-grid">
+            <div class="field"><label for="ops-autoheal-enabled">启用</label><select id="ops-autoheal-enabled"><option value="false">关闭</option><option value="true">开启</option></select></div>
+            <div class="field"><label for="ops-autoheal-interval">间隔（秒）</label><input id="ops-autoheal-interval" type="number" min="10" max="3600" value="30"></div>
+            <div class="field"><label for="ops-autoheal-floor">就绪下限（%）</label><input id="ops-autoheal-floor" type="number" min="1" max="100" value="50"></div>
+            <div class="field"><label for="ops-autoheal-autoscale">自动扩容</label><select id="ops-autoheal-autoscale"><option value="false">关闭</option><option value="true">开启</option></select></div>
+            <div class="field"><label for="ops-autoheal-min">最少 lane</label><input id="ops-autoheal-min" type="number" min="1" max="32" value="1"></div>
+            <div class="field"><label for="ops-autoheal-max">最多 lane</label><input id="ops-autoheal-max" type="number" min="1" max="32" value="8"></div>
+          </div>
+          <div class="actions">
+            <button type="button" class="primary" id="ops-autoheal-save">保存</button>
+            <button type="button" id="ops-autoheal-run">立即运行一轮</button>
+          </div>
+          <pre class="code" id="ops-autoheal-log" role="status" aria-live="polite">暂无动作。</pre>
+          <div class="report" id="ops-autoheal-report" role="status" aria-live="polite" hidden></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>通知目标</h2><span class="card-meta" id="ops-notify-meta">未配置</span></div>
+          <p class="hint">URL 只回显主机名；留空表示保留原 URL。分级 info &lt; warn &lt; critical，critical 不受安静时段限制。</p>
+          <div id="ops-notify-targets"></div>
+          <div class="toolbar"><button type="button" id="ops-notify-add">添加目标</button></div>
+          <div class="integration-grid">
+            <div class="field"><label for="ops-notify-quiet-start">安静开始</label><input id="ops-notify-quiet-start" type="time"></div>
+            <div class="field"><label for="ops-notify-quiet-end">安静结束</label><input id="ops-notify-quiet-end" type="time"></div>
+            <div class="field"><label for="ops-notify-per-minute">每分钟上限</label><input id="ops-notify-per-minute" type="number" min="1" max="120" value="10"></div>
+            <div class="field"><label for="ops-notify-retry">重试次数</label><input id="ops-notify-retry" type="number" min="0" max="3" value="1"></div>
+          </div>
+          <div class="actions">
+            <button type="button" class="primary" id="ops-notify-save">保存目标</button>
+            <button type="button" id="ops-notify-test">测试首个启用目标</button>
+          </div>
+          <div class="report" id="ops-notify-report" role="status" aria-live="polite" hidden></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>自检</h2><span class="card-meta">verify / fingerprint / gate-drill</span></div>
+          <div class="toolbar">
+            <button type="button" class="primary" id="ops-selftest-run">运行自检</button>
+            <span class="hint" id="ops-selftest-state">未运行</span>
+          </div>
+          <pre class="code" id="ops-selftest-output">按「运行自检」执行，可能需要 1–2 分钟。</pre>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>诊断包</h2><span class="card-meta">已去敏</span></div>
+          <p class="hint">打包健康状态、配置、代理池、用量与日志，自动抹去 token、API key、密码和 prompt 内容。</p>
+          <div class="actions"><a class="btn-link" href="/api/diagnostics/bundle" download>下载诊断 ZIP</a></div>
         </div>
       </section>
     </main>

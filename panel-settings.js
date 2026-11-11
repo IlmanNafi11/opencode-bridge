@@ -45,12 +45,16 @@ function 新ID() {
 function 收窄限额(raw) {
   const rpmRaw = Number(raw && raw.rpm);
   const dailyRaw = Number(raw && raw.daily);
+  const burstRaw = Number(raw && raw.burst);
+  const concurrencyRaw = Number(raw && raw.concurrency);
   const rpm = Number.isFinite(rpmRaw) ? Math.min(Math.max(Math.floor(rpmRaw), 0), 600) : 0;
   const daily = Number.isFinite(dailyRaw) ? Math.min(Math.max(Math.floor(dailyRaw), 0), 1000000) : 0;
+  const burst = Number.isFinite(burstRaw) ? Math.min(Math.max(Math.floor(burstRaw), 0), 300) : 0;
+  const concurrency = Number.isFinite(concurrencyRaw) ? Math.min(Math.max(Math.floor(concurrencyRaw), 0), 64) : 0;
   const models = Array.isArray(raw && raw.models)
     ? raw.models.map((entry) => 字符串(entry).slice(0, 120)).filter(Boolean).slice(0, 50)
     : [];
-  return { rpm, daily, models };
+  return { rpm, daily, burst, concurrency, models };
 }
 
 /** 把任意存储值收窄成合法 key 条目；非法条目直接丢弃。 */
@@ -122,7 +126,7 @@ function 写入(patch) {
   }
   // 旧单 key 字段不再落盘：读取时迁移，写入时统一成列表。
   const json = {
-    apiKeys: next.apiKeys.map(({ id, label, key, enabled, createdAt, rpm, daily, models }) => ({
+    apiKeys: next.apiKeys.map(({ id, label, key, enabled, createdAt, rpm, daily, burst, concurrency, models }) => ({
       id,
       label,
       key,
@@ -130,6 +134,8 @@ function 写入(patch) {
       createdAt,
       ...(rpm ? { rpm } : {}),
       ...(daily ? { daily } : {}),
+      ...(burst ? { burst } : {}),
+      ...(concurrency ? { concurrency } : {}),
       ...(models && models.length ? { models } : {}),
     })),
   };
@@ -205,6 +211,8 @@ function matchApiKey(token) {
         source: entry.source,
         rpm: entry.rpm || 0,
         daily: entry.daily || 0,
+        burst: entry.burst || 0,
+        concurrency: entry.concurrency || 0,
         models: Array.isArray(entry.models) ? entry.models : [],
       };
     }
@@ -255,7 +263,7 @@ function 预览(key) {
 
 /** 面板展示用：绝不回传完整密钥。 */
 function listApiKeys() {
-  return 全部密钥().map(({ id, label, key, enabled, createdAt, source, rpm, daily, models }) => ({
+  return 全部密钥().map(({ id, label, key, enabled, createdAt, source, rpm, daily, burst, concurrency, models }) => ({
     id,
     label,
     enabled,
@@ -264,11 +272,13 @@ function listApiKeys() {
     preview: 预览(key),
     rpm: rpm || 0,
     daily: daily || 0,
+    burst: burst || 0,
+    concurrency: concurrency || 0,
     models: Array.isArray(models) ? models : [],
   }));
 }
 
-function addApiKey({ label = "", key = "", rpm = 0, daily = 0, models = [] } = {}) {
+function addApiKey({ label = "", key = "", rpm = 0, daily = 0, burst = 0, concurrency = 0, models = [] } = {}) {
   const labelError = 校验标签(label);
   if (labelError) return { ok: false, error: labelError };
   const keyError = 校验密钥("API key", key);
@@ -285,12 +295,12 @@ function addApiKey({ label = "", key = "", rpm = 0, daily = 0, models = [] } = {
     key: text,
     enabled: true,
     createdAt: Date.now(),
-    ...收窄限额({ rpm, daily, models }),
+    ...收窄限额({ rpm, daily, burst, concurrency, models }),
   };
   return { ok: true, data: 写入({ apiKeys: [...data.apiKeys, entry] }) };
 }
 
-function updateApiKey(id, { label, enabled, rpm, daily, models } = {}) {
+function updateApiKey(id, { label, enabled, rpm, daily, burst, concurrency, models } = {}) {
   const data = 读取();
   const index = data.apiKeys.findIndex((entry) => entry.id === id);
   if (index === -1) {
@@ -305,10 +315,12 @@ function updateApiKey(id, { label, enabled, rpm, daily, models } = {}) {
   const entry = { ...next[index] };
   if (label !== undefined) entry.label = 字符串(label) || entry.label;
   if (enabled !== undefined) entry.enabled = enabled !== false;
-  if (rpm !== undefined || daily !== undefined || models !== undefined) {
+  if (rpm !== undefined || daily !== undefined || burst !== undefined || concurrency !== undefined || models !== undefined) {
     Object.assign(entry, 收窄限额({
       rpm: rpm !== undefined ? rpm : entry.rpm,
       daily: daily !== undefined ? daily : entry.daily,
+      burst: burst !== undefined ? burst : entry.burst,
+      concurrency: concurrency !== undefined ? concurrency : entry.concurrency,
       models: models !== undefined ? models : entry.models,
     }));
   }

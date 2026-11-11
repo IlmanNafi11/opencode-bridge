@@ -154,7 +154,7 @@ if [ -n "$PREV_VERSION" ]; then
   say "Found existing install: v$PREV_VERSION in $BINDIR"
   BACKUP="$BINDIR/.backup-v$PREV_VERSION-$(date +%Y%m%d%H%M%S)"
   mkdir -p "$BACKUP"
-  for f in server.js identity.js token-budget.js verify.js gate-drill.js transport-fingerprint.js transport-baseline.json package.json tunnel-doctor.sh proxy.js panel.js panel-avatar.png panel-settings.js config.js model-groups.js socks-bridge.js warp.js compat.js stats.js egress-proxy.js THIRD_PARTY_NOTICES.md; do
+  for f in server.js identity.js token-budget.js verify.js gate-drill.js transport-fingerprint.js transport-baseline.json package.json tunnel-doctor.sh proxy.js panel.js panel-avatar.png panel-settings.js config.js model-groups.js socks-bridge.js warp.js warp-farm.js compat.js stats.js egress-proxy.js audit.js autoheal.js backup.js dashboard-api.js diagnostics.js notify.js observability.js ops.js retention.js selftest.js THIRD_PARTY_NOTICES.md; do
     [ -f "$BINDIR/$f" ] && cp -p "$BINDIR/$f" "$BACKUP/$f" 2>/dev/null || true
   done
   say "Backed up to $BACKUP"
@@ -357,6 +357,7 @@ say "Installing into $BINDIR"
 fetch() {
   local file="$1"
   local tmp="$STAGE/$file"
+  mkdir -p "$(dirname "$tmp")"
   if [ "$SOURCE" = "local" ]; then
     [ -f "$SRC_DIR/$file" ] || die "$file is missing from the local checkout ($SRC_DIR)"
     cp -p "$SRC_DIR/$file" "$tmp"
@@ -400,9 +401,30 @@ fetch model-groups.js
 fetch socks-bridge.js
 fetch warp.js
 fetch warp-farm.js
+fetch warp-farm/main.go
+fetch warp-farm/bind.go
+fetch warp-farm/exit.go
+fetch warp-farm/freebind_linux.go
+fetch warp-farm/freebind_other.go
+fetch warp-farm/registrar.go
+fetch warp-farm/socks5.go
+fetch warp-farm/go.mod
+fetch warp-farm/go.sum
+fetch warp-farm/LICENSE
+fetch warp-farm/NOTICE.md
 fetch compat.js
 fetch stats.js
 fetch egress-proxy.js
+fetch audit.js
+fetch autoheal.js
+fetch backup.js
+fetch dashboard-api.js
+fetch diagnostics.js
+fetch notify.js
+fetch observability.js
+fetch ops.js
+fetch retention.js
+fetch selftest.js
 
 # 语法损坏的发布绝不能替换可用的安装。
 #
@@ -417,7 +439,7 @@ syntax_check() {
   ' "$1"
 }
 
-for js in server.js identity.js token-budget.js verify.js gate-drill.js transport-fingerprint.js proxy.js panel.js panel-settings.js config.js model-groups.js socks-bridge.js warp.js warp-farm.js compat.js stats.js egress-proxy.js; do
+for js in server.js identity.js token-budget.js verify.js gate-drill.js transport-fingerprint.js proxy.js panel.js panel-settings.js config.js model-groups.js socks-bridge.js warp.js warp-farm.js compat.js stats.js egress-proxy.js audit.js autoheal.js backup.js dashboard-api.js diagnostics.js notify.js observability.js ops.js retention.js selftest.js; do
   syntax_check "$STAGE/$js" >/dev/null 2>&1 || die "$js failed a syntax check; the running gateway was left untouched"
 done
 for json in package.json transport-baseline.json; do
@@ -448,27 +470,28 @@ if [ -n "$(port_holder)" ]; then
   die "cannot bind port $PORT"
 fi
 
-for file in package.json server.js identity.js token-budget.js verify.js gate-drill.js transport-fingerprint.js transport-baseline.json tunnel-doctor.sh proxy.js panel.js panel-avatar.png panel-settings.js config.js model-groups.js socks-bridge.js warp.js warp-farm.js compat.js stats.js egress-proxy.js THIRD_PARTY_NOTICES.md; do
+for file in package.json server.js identity.js token-budget.js verify.js gate-drill.js transport-fingerprint.js transport-baseline.json tunnel-doctor.sh proxy.js panel.js panel-avatar.png panel-settings.js config.js model-groups.js socks-bridge.js warp.js warp-farm.js compat.js stats.js egress-proxy.js audit.js autoheal.js backup.js dashboard-api.js diagnostics.js notify.js observability.js ops.js retention.js selftest.js THIRD_PARTY_NOTICES.md; do
   [ -f "$STAGE/$file" ] && mv -f "$STAGE/$file" "$BINDIR/$file"
 done
+if [ -d "$STAGE/warp-farm" ]; then
+  mkdir -p "$BINDIR/warp-farm"
+  cp -p "$STAGE/warp-farm"/* "$BINDIR/warp-farm/" 2>/dev/null || true
+fi
 chmod +x "$BINDIR/server.js" "$BINDIR/identity.js" "$BINDIR/verify.js" "$BINDIR/gate-drill.js" "$BINDIR/transport-fingerprint.js" "$BINDIR/tunnel-doctor.sh" "$BINDIR/egress-proxy.js" 2>/dev/null || true
 say "Files installed (v$("$RUNTIME" -e 'try{process.stdout.write(require(process.argv[1]).version||"latest")}catch{process.stdout.write("latest")}' "$BINDIR/package.json" 2>/dev/null || echo 'latest'))"
 
 # ------------------------------------------------------- WARP farm 二进制 ---
 # 源码随仓库发布，二进制按机器构建。Go 是可选依赖：没有 Go 只是没有
-# WARP farm，其余网关功能不受影响。
+# WARP farm，其余网关功能不受影响。远端安装也会下载 Go 源码。
 if command -v go >/dev/null 2>&1; then
-  if [ "$SOURCE" = "local" ] && [ -f "$SRC_DIR/warp-farm/go.mod" ]; then
-    mkdir -p "$BINDIR/warp-farm"
-    cp -p "$SRC_DIR/warp-farm"/*.go "$SRC_DIR/warp-farm/go.mod" "$SRC_DIR/warp-farm/go.sum" "$BINDIR/warp-farm/" 2>/dev/null || true
-    cp -p "$SRC_DIR/warp-farm/LICENSE" "$SRC_DIR/warp-farm/NOTICE.md" "$BINDIR/warp-farm/" 2>/dev/null || true
+  if [ -f "$BINDIR/warp-farm/go.mod" ]; then
     if ( cd "$BINDIR/warp-farm" && CGO_ENABLED=0 go build -trimpath -o warp-farm . ); then
       say "warp-farm sidecar built"
     else
       warn "warp-farm build failed; run 'cd warp-farm && go build' manually to enable WARP farm"
     fi
   else
-    warn "Go found but warp-farm sources are not downloaded (remote install); build them from a checkout to enable WARP farm"
+    warn "warp-farm sources are missing; run the installer from a checkout to enable WARP farm"
   fi
 else
   say "Go not found — skipping optional warp-farm sidecar"

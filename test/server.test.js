@@ -515,6 +515,51 @@ describe("server unit & integration tests", () => {
       }
     });
 
+    it("fails over to the next model-group candidate on a first-event timeout", async () => {
+      const previousStateDir = process.env.FUCKING_OPENCODE_STATE_DIR;
+      const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "ofb-failover-"));
+      process.env.FUCKING_OPENCODE_STATE_DIR = stateDir;
+      process.env.FUCKING_OPENCODE_MODEL_GROUPS = JSON.stringify({
+        "rotate-test": ["longcat-2.5-preview-free", "big-pickle"],
+      });
+      process.env.FIRST_EVENT_TIMEOUT_MS = "50";
+      require("../config").__reload();
+
+      const seen = [];
+      let call = 0;
+      mockFetchImpl = async (_url, init) => {
+        seen.push(JSON.parse(init.body).model);
+        call += 1;
+        if (call === 1) {
+          return { ok: true, status: 200, body: new ReadableStream({ start() {} }) };
+        }
+        return {
+          ok: true,
+          status: 200,
+          body: sseStreamFromLines([
+            'data: {"choices":[{"index":0,"delta":{"content":"ok"},"finish_reason":"stop"}],"usage":null}\n\n',
+            "data: [DONE]\n\n",
+          ]),
+        };
+      };
+      try {
+        const res = await httpRequest(port, "POST", "/v1/chat/completions", {
+          model: "rotate-test",
+          stream: false,
+          messages: [{ role: "user", content: "hi" }],
+        });
+        assert.equal(res.status, 200);
+        assert.deepStrictEqual(seen, ["longcat-2.5-preview-free", "big-pickle"]);
+      } finally {
+        delete process.env.FIRST_EVENT_TIMEOUT_MS;
+        delete process.env.FUCKING_OPENCODE_MODEL_GROUPS;
+        require("../config").__reload();
+        if (previousStateDir === undefined) delete process.env.FUCKING_OPENCODE_STATE_DIR;
+        else process.env.FUCKING_OPENCODE_STATE_DIR = previousStateDir;
+        fs.rmSync(stateDir, { recursive: true, force: true });
+      }
+    });
+
     it("returns 504 quickly when upstream accepts the request but never sends a first event", async () => {
       const previousStateDir = process.env.FUCKING_OPENCODE_STATE_DIR;
       const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "ofb-first-event-"));

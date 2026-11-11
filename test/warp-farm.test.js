@@ -4,6 +4,50 @@ const { describe, it } = require("node:test");
 const farm = require("../warp-farm");
 
 describe("warp-farm bridge", () => {
+  it("keeps a cooling /64 out of the pool until its block cooldown expires", () => {
+    const fs = require("node:fs");
+    const os = require("node:os");
+    const path = require("node:path");
+    const proxy = require("../proxy");
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ofb-farm-block-"));
+    const previous = process.env.FUCKING_OPENCODE_STATE_DIR;
+    process.env.FUCKING_OPENCODE_STATE_DIR = dir;
+    try {
+      const one = "socks5://127.0.0.1:41001";
+      const two = "socks5://127.0.0.1:41002";
+      proxy.setPool({
+        entries: [
+          { id: "warp-f1", url: one },
+          { id: "warp-f2", url: two },
+        ],
+        strategy: "round-robin",
+      });
+      proxy.markFailure(one, { reason: "allowance 429", cooldownMs: 60000 });
+
+      const result = farm.applyPool({
+        lanes: [
+          { index: 1, port: 41001, url: one, egress: "2a09:bac1:34e0:628::1", ready: true },
+          { index: 2, port: 41002, url: two, egress: "2a09:bac5:39e3:2646::1", ready: true },
+          { index: 3, port: 41003, url: "socks5://127.0.0.1:41003", egress: "", ready: false },
+        ],
+      });
+      assert.equal(result.ok, true);
+      assert.deepStrictEqual(
+        proxy.getPool().map((entry) => entry.id).sort(),
+        ["warp-f2"]
+      );
+      assert.deepStrictEqual(farm.status().coolingBlocks, [
+        { block: "2a09:bac1:34e0:628", until: farm.status().coolingBlocks[0].until },
+      ]);
+      assert.ok(farm.status().coolingBlocks[0].until > Date.now());
+    } finally {
+      require("../proxy").setPool({ entries: [] });
+      if (previous === undefined) delete process.env.FUCKING_OPENCODE_STATE_DIR;
+      else process.env.FUCKING_OPENCODE_STATE_DIR = previous;
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("maps lanes to pool entries the proxy module accepts", () => {
     const entries = farm.poolEntries({
       lanes: [

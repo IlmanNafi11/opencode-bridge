@@ -121,6 +121,7 @@ type farm struct {
 	reserved    map[string]bool
 	lanes       []*lane
 	listeners   []net.Listener
+	registrationSlots chan struct{}
 }
 
 func newFarm(ctx context.Context, host string, basePort, controlPort, size int, stack Stack, source netip.Prefix) *farm {
@@ -135,6 +136,7 @@ func newFarm(ctx context.Context, host string, basePort, controlPort, size int, 
 		source:      source,
 		registry:    newRegistrar(),
 		reserved:    make(map[string]bool),
+		registrationSlots: make(chan struct{}, 2),
 	}
 	for i := range size {
 		f.lanes = append(f.lanes, &lane{index: i + 1, port: basePort + i})
@@ -153,16 +155,19 @@ func (f *farm) start() error {
 		go serveSOCKS5(ln, l)
 	}
 	for _, l := range f.lanes {
-		go f.fillLane(l)
+		go f.fillLane(l, f.registrationSlots)
 	}
 	return nil
 }
 
 // fillLane 为 lane 建立第一个 exit；注册被限流时按窗口重试，而不是让 lane
-// 永久失败。
-func (f *farm) fillLane(l *lane) {
+// 永久失败。registrationSlots 把并发注册限制为 2：一个出口先就绪供流量使用，
+// 其余 lane 在后台补齐，避免启动瞬间 N 个注册撞上 Cloudflare 的限流窗口。
+func (f *farm) fillLane(l *lane, slots chan struct{}) {
 	for {
+		slots <- struct{}{}
 		e, err := f.acquireExit()
+		<-slots
 		if err == nil {
 			l.setExit(e)
 			log.Printf("warp-farm lane %d ready at %s via port %d", l.index, e.egress, l.port)

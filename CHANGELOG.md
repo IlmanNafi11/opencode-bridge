@@ -2,12 +2,56 @@
 
 ## [0.1.6] — 2026-11-11
 
+Operations hardening and panel follow-through:
+
+- **Per-key burst and concurrency limits.** API keys accept `burst` (per 10 s)
+  and `concurrency` (in-flight) alongside `rpm`/`daily`. Rejections are `429`
+  with `Retry-After`, `X-RateLimit-Limit`, and `X-RateLimit-Remaining`;
+  `/api/keys/usage` reports live concurrency and remaining burst.
+- **Admin audit log.** Every mutating panel action appends to
+  `<state>/audit.jsonl` (mode `0600`, 2 MiB rotation) with sensitive keys
+  redacted. `GET/POST /api/audit` reads or clears it.
+- **Retention and scheduled backups.** `GET/POST /api/retention` plus
+  `/api/retention/run` prune `usage.jsonl`, audit, and snapshots per day/byte
+  caps (disabled by default). `GET/POST /api/backups` create, list, schedule,
+  and restore whitelisted state files only.
+- **Auto-heal round.** `autoheal.js` rotates at most one dead lane per round
+  (per-port backoff), restarts the farm only when no lane is ready, and scales
+  up on sustained congestion when enabled. `GET/POST /api/autoheal` and
+  `/api/autoheal/run` expose it. The scheduler reads `settings.enabled`, so an
+  enable saved from the panel starts rounds immediately instead of reporting
+  `skipped: "disabled"`. Lane rotation reapplies the pool, and the pool cache
+  compares live entries as well as the URL signature, so a shrunk pool is
+  restored instead of staying short.
+- **Multi-target notifications.** `notify.js` routes to up to 10 targets with
+  `minLevel`, quiet hours (critical bypasses), per-minute cap, and 429/5xx
+  retry. `GET/POST /api/notify` and `POST /api/notify/test`.
+- **Error classification.** Egress failures are bucketed as `abuse`, `shape`,
+  `quota`, `auth`, `server`, or `other` and surfaced in `/api/observability`.
+- **Model groups.** `modelGroupWeights` (alias → model → 1..100) reorders
+  candidates with a stable sort; `GET /api/models/simulate` previews the pick
+  and cooldown reasons. Farm resize is `POST /api/farm/resize`.
+- **Panel.** Ops view gains audit, retention, backup, auto-heal, notification,
+  and error-classification cards, all translated to ID/EN; config gains weights
+  and simulation; farm gains resize; keyboard focus, skip link, and mobile
+  tables verified.
+- **Packaging and self-update.** `install.sh`, the npm `files` list, and
+  `UPDATE_FILES` now include every admin module (`audit`, `autoheal`, `backup`,
+  `dashboard-api`, `diagnostics`, `notify`, `observability`, `ops`,
+  `retention`, `selftest`) so fresh installs and updates cannot miss a module.
+  Remote installs download the `warp-farm` Go sources; self-update rewrites
+  them and rebuilds the sidecar when Go is available, keeping an old binary on
+  build failure.
+
+## [0.1.5b] — 2026-11-11
+
 Stall detection and quota hygiene, matching opencode2api where it matters:
 
 - **First-event timeout.** `FIRST_EVENT_TIMEOUT_MS` (default `15000`, `0`
   disables) applies to the first SSE byte. An upstream that answers `200` and
-  then goes silent is canceled, its exit is cooled, and the client gets a fast
-  `504 first_event_timeout` instead of hanging until the 120 s deadline.
+  then goes silent is canceled, its exit is cooled, the next model-group
+  candidate is tried, and only when every candidate stalls does the client get
+  a fast `504 first_event_timeout` instead of hanging until the 120 s deadline.
 - **Anonymous-lane circuit breaker.** `ANON_BACKOFF_THRESHOLD` (default `0`,
   off), `ANON_BACKOFF_BASE_HOURS` (1), `ANON_BACKOFF_MAX_HOURS` (24). After N
   final `429`/IP-abuse rejections the anonymous lane pauses with exponential
@@ -16,12 +60,45 @@ Stall detection and quota hygiene, matching opencode2api where it matters:
 - **Per-egress-block cooldown.** When a WARP lane is parked for quota, its
   IPv6 `/64` (IPv4 `/32`) stays out of the pool for 30 minutes, so a lane that
   re-registers onto the same prefix cannot quietly reuse an exhausted block.
+  If every ready lane's block is cooling the pool keeps the ready lanes rather
+  than emptying: an empty pool means host-IP traffic, which is what triggers
+  IP-level abuse, so WARP is always preferred.
+- **Pool only takes ready WARP lanes.** Lanes still registering are no longer
+  published as SOCKS entries, which previously produced `502 Proxy refused to
+  open a tunnel` and burned retries. The watchdog re-applies the pool as each
+  lane reports ready.
+- **Warm start.** The sidecar registers two lanes concurrently, so the pool has
+  a usable exit within seconds while the rest register in the background.
+- **Panel docs and cooling status.** The panel now has copy-ready cURL snippets
+  for Chat Completions, Responses, and Anthropic Messages, plus OpenAI SDK
+  snippets for Python and JavaScript, and the proxy card lists cooling `/64`
+  blocks that are temporarily out of rotation.
 - **Rotating proxy pool entries.** `pool+http://…` or `http://…#pool` marks an
   endpoint that assigns a new IP per connection. Such entries never cool down
   and are never excluded by retry logic.
 - **Reasoning effort defaults.** `config.json` / env `REASONING_EFFORT` and
   `REASONING_EFFORT_BY_MODEL` (JSON model → level) fill `reasoning_effort`
   when the client omits it; an explicit client value always wins.
+- **Observability dashboard.** Request traces with a per-exit scoreboard
+  (success/429/IP-abuse/5xx/timeout/swaps, p50/p95 first event), in-flight
+  list, waterfall detail, combined health score, and an incident banner backed
+  by `<state>/incidents.json`; `/metrics` now appends the same counters.
+- **Model health.** `GET /api/models` merges catalog verdicts, group candidates
+  and cooldowns; the panel tests one alias without warming a real request.
+- **Ops controls.** Safe mode pins a single lane and disables rotation until
+  it expires; scheduled maintenance rotates/restarts only while idle, honors
+  quiet hours and per-incident abuse reactions; every action is persisted.
+- **Diagnostics and self-test.** A redacted ZIP bundles health, config, pool,
+  farm, usage and recent events; the panel can run `verify --quick`,
+  the TLS fingerprint check and the gate drill sequentially and stream output.
+- **Config snapshots.** Every `config.json` write archives the previous value
+  (last 10); `POST /api/config {"restoreSnapshot":"<id>"}` rolls back
+  atomically. The panel adds a model-group editor with candidate ordering.
+- **Key usage and backups.** Per-key minute/day usage with 24 h top consumers,
+  session→egress affinity, WARP lane probe/rotate endpoints, and a backup
+  diff preview before restore.
+- **Incident webhooks.** `NOTIFY_WEBHOOK_URL` (Discord/Telegram/generic) sends
+  new incidents, deduped for 5 minutes and capped at 10 per minute.
 
 ## [0.1.5] — 2026-11-11
 

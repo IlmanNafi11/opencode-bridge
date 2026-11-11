@@ -69,13 +69,48 @@ function 组成员(别名) {
   return [...new Set(列表)];
 }
 
+/** 组别名 → 权重表；缺省为空对象。 */
+function 组权重(别名) {
+  const 全部 = require("./config").取("modelGroupWeights") || {};
+  const 映射 = 全部[别名];
+  return 映射 && typeof 映射 === "object" && !Array.isArray(映射) ? 映射 : {};
+}
+
 function 候选(请求模型) {
   const 组 = 组成员(请求模型);
   if (!组) return [请求模型];
+  const 权重 = 组权重(请求模型);
+  const 排序 = 组
+    .map((模型, index) => ({ 模型, index, 权重: Number(权重[模型]) || 0 }))
+    .sort((a, b) => (b.权重 - a.权重) || (a.index - b.index))
+    .map((项) => 项.模型);
   const 状态 = 读取();
   const now = Date.now();
-  const 可用 = 组.filter((模型) => !状态[模型] || 状态[模型].until <= now);
-  return 可用.length ? 可用 : 组;
+  const 可用 = 排序.filter((模型) => !状态[模型] || 状态[模型].until <= now);
+  return 可用.length ? 可用 : 排序;
+}
+
+/** 面板模拟：给出该请求会选哪个模型、有序候选与冷却原因。 */
+function 模拟(请求模型) {
+  const 组 = 组成员(请求模型);
+  const 状态 = 读取();
+  const now = Date.now();
+  const 权重 = 组 ? 组权重(请求模型) : {};
+  const 排序 = (组 || [请求模型]).map((模型, index) => ({ 模型, index, 权重: Number(权重[模型]) || 0 }))
+    .sort((a, b) => (b.权重 - a.权重) || (a.index - b.index));
+  const 明细 = 排序.map((项) => {
+    const 记录 = 状态[项.模型];
+    const 冷却到 = 记录 && 记录.until > now ? 记录.until : 0;
+    return { 模型: 项.模型, 权重: 项.权重, 可用: !冷却到, 冷却到, 原因: 冷却到 ? 记录.reason : "" };
+  });
+  const 选中 = 明细.find((项) => 项.可用) || 明细[0] || null;
+  return {
+    alias: 组 ? 请求模型 : null,
+    候选: 组 ? 排序.map((项) => 项.模型) : [],
+    明细,
+    选中: 选中 ? 选中.模型 : 请求模型,
+    回落: Boolean(选中 && 选中.模型 !== 请求模型),
+  };
 }
 
 function 记录失败(模型, status) {
@@ -124,4 +159,4 @@ function 重置() {
   return { ok: true, cleared: 之前 };
 }
 
-module.exports = { 候选, 组成员, 记录失败, 记录成功, 诊断, 重置, 健康文件, __reload };
+module.exports = { 候选, 组成员, 组权重, 模拟, 记录失败, 记录成功, 诊断, 重置, 健康文件, __reload };
