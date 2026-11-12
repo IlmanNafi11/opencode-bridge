@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="MIT license"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0--or--later-blue" alt="GPL-3.0-or-later license"></a>
   <img src="https://img.shields.io/badge/runtime-Bun-black" alt="Bun runtime">
   <img src="https://img.shields.io/badge/dependencies-0-informational" alt="Zero dependencies">
 </p>
@@ -829,4 +829,4 @@ next to the script.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+GPL-3.0-or-later — see [LICENSE](LICENSE). Original work Copyright (c) 2026 azrinaldi; fork modifications by ShinRyu04 and contributors.
