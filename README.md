@@ -829,4 +829,4 @@ next to the script.
 
 ## License
 
-AGPL-3.0-or-later — see [LICENSE](LICENSE). Copyright (c) 2026 ShinRyu04; portions derived from azrinaldi/opencode-free-bridge (MIT) remain under their original notice.
+AGPL-3.0-or-later — see [LICENSE](LICENSE). Copyright (c) 2026 ShinRyu04.
