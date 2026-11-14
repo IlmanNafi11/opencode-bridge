@@ -19,6 +19,8 @@ const fleet = require("./fleet");
 const 排除接法 = new Set(["pending", "unknown", "relay-http", "warp"]);
 
 /** pool 只接受这三种策略；照抄 proxy.js 的取值域，避免传给 setPool 非法值。 */
+/** Waktu terakhir applyToPool berhasil, per fleet.db (kunci = DBPath). */
+const 最后应用时间表 = new Map();
 const 策略域 = new Set(["round-robin", "failover", "random"]);
 
 function 默认策略() {
@@ -143,10 +145,15 @@ function applyToPool(opts = {}) {
     skipped,
     lastAppliedAt: new Date().toISOString(),
   };
+  最后应用时间表.set(fleet.DBPath(), summary.lastAppliedAt);
   console.log(
     `[fucking-opencode] fleet：pool diterapkan — ${summary.nodeCount} node + ${summary.farmCount} farm, strategi ${策略}`
   );
   return summary;
 }
 
-module.exports = { applyToPool, farm条目, 默认策略 };
+/** Tanya kapan terakhir applyToPool sukses; null artinya belum pernah. */
+function getLastAppliedAt() {
+  return 最后应用时间表.get(fleet.DBPath()) || null;
+}
+module.exports = { applyToPool, farm条目, 默认策略, getLastAppliedAt };

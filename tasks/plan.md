@@ -158,14 +158,14 @@
 
 ### Phase 5: Observability
 
-- [ ] Task 9: Endpoint `/api/fleet/status` & `/api/fleet/events`
-  - **Description:** Buat `fleet-panel-routes.js` yang mendaftarkan `/api/fleet/status` (GET) → `{nodes, healthSummarize, quotaSignalCounts, poolConfig, lastAppliedAt}` dan `/api/fleet/events` (GET) dengan filter `{nodeId?, action?, since?}`. Gunakan pola yang ada.
+- [x] Task 9: Endpoint `/api/fleet/status` & `/api/fleet/events`
+  - **Description:** Buat `fleet-panel-routes.js` yang mendaftarkan `/api/fleet/status` (GET) → `{nodes, health, quotaSignalCounts, poolConfig, lastAppliedAt, summary}` dan `/api/fleet/events` (GET) dengan filter `{nodeId?, action?, since?}`. Gunakan pola yang ada.
   - **Acceptance criteria:**
-    - [ ] `/api/fleet/status` → JSON konsisten dengan field yang disebut.
-    - [ ] `/api/fleet/events` → event terbaru / diff filter.
-    - [ ] Ringkasan kondisi pool: `OK`/`DEGRADED`/`CRITICAL`.
+    - [x] `/api/fleet/status` → JSON konsisten dengan field yang disebut.
+    - [x] `/api/fleet/events` → event terbaru / diff filter.
+    - [x] Ringkasan kondisi pool: `OK`/`DEGRADED`/`CRITICAL`.
   - **Verifikasi:**
-    - [ ] Smoke: curl kedua endpoint → isi sesuai spesifikasi.
+    - [x] Smoke: curl kedua endpoint → isi sesuai spesifikasi.
   - **Dependencies:** Task 8
   - **Files:** `fleet-panel-routes.js` (baru), `server.js`
   - **Estimated scope:** M (3–5 files)

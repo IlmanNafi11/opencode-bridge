@@ -271,3 +271,73 @@ describe("/api/fleet/apply-pool", () => {
     assert.equal(r.headers.allow, "POST");
   });
 });
+
+describe("/api/fleet/status & /api/fleet/events", () => {
+  let port;
+  let server;
+
+  before(async () => {
+    await new Promise((resolve) => {
+      server = srv.server.listen(0, "127.0.0.1", () => {
+        port = server.address().port;
+        resolve();
+      });
+    });
+  });
+
+  after(async () => {
+    if (typeof fleet.close === "function") fleet.close();
+    await new Promise((resolve) => server.close(resolve));
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it("GET /api/fleet/status returns a consistent fleet summary", async () => {
+    await request(port, "POST", "/api/fleet/init", {});
+    const reg = await request(port, "POST", "/api/fleet/register", {
+      label: "status-e2e-1",
+      node_type: "vps-public",
+      connect_kind: "direct-proxy",
+      egress_spec: { proxyUrl: "http://127.0.0.1:3128" },
+    });
+    assert.equal(reg.status, 200, JSON.stringify(reg.body));
+    assert.equal(fleet.updateNode(reg.body.nodeId, { reachable: true }).ok, true);
+
+    await request(port, "POST", "/api/fleet/apply-pool", {});
+
+    const r = await request(port, "GET", "/api/fleet/status");
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(r.body.ok, true);
+    assert.ok(Array.isArray(r.body.nodes));
+    assert.ok(Array.isArray(r.body.health));
+    assert.equal(typeof r.body.quotaSignalCounts, "object");
+    assert.equal(typeof r.body.poolConfig, "object");
+    assert.ok(r.body.lastAppliedAt, "apply-pool terakhir harus tercermin di status");
+    assert.ok(["OK", "DEGRADED", "CRITICAL"].includes(r.body.summary.condition));
+  });
+
+  it("GET /api/fleet/events returns register events and filters by nodeId", async () => {
+    const reg = await request(port, "POST", "/api/fleet/register", {
+      label: "events-e2e-1",
+      node_type: "vps-nat",
+      connect_kind: "direct-proxy",
+      egress_spec: { proxyUrl: "http://127.0.0.1:3129" },
+    });
+    assert.equal(reg.status, 200, JSON.stringify(reg.body));
+
+    const all = await request(port, "GET", "/api/fleet/events");
+    assert.equal(all.status, 200, JSON.stringify(all.body));
+    assert.equal(all.body.ok, true);
+    assert.ok(Array.isArray(all.body.events));
+    assert.ok(all.body.events.length >= 1);
+
+    const byNode = await request(port, "GET", `/api/fleet/events?nodeId=${reg.body.nodeId}`);
+    assert.equal(byNode.status, 200, JSON.stringify(byNode.body));
+    assert.ok(byNode.body.events.every((e) => e.node_id === reg.body.nodeId));
+  });
+
+  it("rejects non-GET methods on /api/fleet/status", async () => {
+    const r = await request(port, "POST", "/api/fleet/status", {});
+    assert.equal(r.status, 405);
+    assert.equal(r.headers.allow, "GET");
+  });
+});

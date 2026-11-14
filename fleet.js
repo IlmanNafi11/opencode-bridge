@@ -345,6 +345,35 @@ function readQuotaSignals({ nodeId = null, since = null, limit = 100 } = {}) {
   }
 }
 /**
+ * Riwayat event (`node_events`) dengan filter opsional nodeId/action/since.
+ * Terbaru dulu; limit dijepit 0–500 agar endpoint tidak memboroskan memori.
+ */
+function readEvents({ nodeId = null, action = null, since = null, limit = 100 } = {}) {
+  const db = 打开DB();
+  if (!db) return [];
+  try {
+    const 条件 = [];
+    const 参数 = [];
+    if (nodeId) {
+      条件.push("node_id = ?");
+      参数.push(String(nodeId));
+    }
+    if (action) {
+      条件.push("action = ?");
+      参数.push(String(action));
+    }
+    if (since) {
+      条件.push("at >= ?");
+      参数.push(String(since));
+    }
+    const where = 条件.length ? `WHERE ${条件.join(" AND ")}` : "";
+    const n = Number.isFinite(Number(limit)) ? Math.max(0, Math.min(Number(limit), 500)) : 100;
+    return db.query(`SELECT * FROM node_events ${where} ORDER BY at DESC, id DESC LIMIT ${n}`).all(...参数);
+  } catch {
+    return [];
+  }
+}
+/**
  * Sinkronisasi sinyal kuota dari request nyata (hook 记录出口失败 di server.js).
  * Cocokkan URL egress ke node terdaftar; kalau ketemu, catat sinyal + set
  * cooldown (block_based_on_quota). URL tak terdaftar → matched:false, no-op.
@@ -477,6 +506,7 @@ module.exports = {
   writeQuotaSignal,
   readQuotaSignals,
   onRequestQuotaSignal,
+  readEvents,
   writeHealth,
   readHealthSummaries,
   DBPath,

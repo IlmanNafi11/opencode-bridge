@@ -136,6 +136,11 @@ const fleetMonitor = 加载本地模块("fleet-health-monitor", HEALTH_MONITOR_F
 const 舰队编排 = 加载本地模块("fleet-orchestrator", {
   applyToPool: () => ({ ok: false, error: { message: "fleet-orchestrator.js 未安装", type: "unavailable", code: "orchestrator_unavailable" } }),
 });
+// Observabilitas fleet: status + event. Murni baca; missing → endpoint 503.
+const fleetPanelRoutes = 加载本地模块("fleet-panel-routes", {
+  fleetStatus: () => ({ ok: false, error: { message: "fleet-panel-routes.js 未安装", type: "unavailable", code: "panel_unavailable" } }),
+  fleetEvents: () => ({ ok: false, error: { message: "fleet-panel-routes.js 未安装", type: "unavailable", code: "panel_unavailable" } }),
+});
 
 const 观测 = require("./observability");
 const 通知 = require("./notify");
@@ -3081,6 +3086,36 @@ async function 处理代理API(req, res, pathname) {
 
 
 /**
+ * `/api/fleet/status` & `/api/fleet/events` —— observabilitas fleet (GET,
+ * murni baca). Admin guard dipasang di upstream; di sini cuma susun respons.
+ */
+function 处理Fleet读API(req, res, pathname) {
+  const send = (status, body) => {
+    res.writeHead(status, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+    res.end(JSON.stringify(body));
+  };
+
+  if (pathname === "/api/fleet/status") {
+    const status = fleetPanelRoutes.fleetStatus();
+    return send(status.ok ? 200 : 503, status);
+  }
+
+  if (pathname === "/api/fleet/events") {
+    const 地址 = new URL(req.url, `http://${req.headers?.host || "127.0.0.1"}`);
+    const params = {
+      nodeId: 地址.searchParams.get("nodeId") || null,
+      action: 地址.searchParams.get("action") || null,
+      since: 地址.searchParams.get("since") || null,
+      limit: 地址.searchParams.get("limit") || 100,
+    };
+    const status = fleetPanelRoutes.fleetEvents(params);
+    return send(status.ok ? 200 : 503, status);
+  }
+
+  return send(404, { ok: false, error: { message: "Endpoint fleet tidak dikenal.", type: "not_found", code: "not_found" } });
+}
+
+/**
  * `/api/fleet/*` —— egress 节点注册表（Armada Cerdas C2）。只暴露注册表本身：
  * 探测、健康循环与池编排在后续阶段接入。管理面门禁（面板会话、Host、JSON
  * Content-Type）由上游路由统一把守。
@@ -3785,6 +3820,22 @@ async function 处理请求主体(req, res) {
       res.writeHead(500, { "Content-Type": "application/json", "Cache-Control": "no-store" });
       res.end(JSON.stringify({ error: `Kesalahan internal: ${err.message}` }));
     });
+    return;
+  }
+
+  if (pathname === "/api/fleet/status" || pathname === "/api/fleet/events") {
+    const denied = adminRequestError(req);
+    if (denied) {
+      res.writeHead(403, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+      return res.end(JSON.stringify({ error: denied }));
+    }
+    if (!panelAuthorized(req)) return panelUnauthorized(res);
+    if (req.method !== "GET") {
+      res.setHeader("Allow", "GET");
+      res.writeHead(405, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+      return res.end(JSON.stringify({ ok: false, error: { message: "Gunakan GET.", type: "method", code: "method_not_allowed" } }));
+    }
+    处理Fleet读API(req, res, pathname);
     return;
   }
 

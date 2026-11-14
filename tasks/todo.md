@@ -95,8 +95,8 @@
 
 ## Phase 5: Observability
 
-- [ ] Task 9: Endpoint `/api/fleet/status` & `/api/fleet/events`
-  - **Acceptance:** status → `{nodes, healthSummarize, quotaSignalCounts, poolConfig, lastAppliedAt}`; events filter; ringkasan OK/DEGRADED/CRITICAL.
+- [x] Task 9: Endpoint `/api/fleet/status` & `/api/fleet/events`
+  - **Acceptance:** status → `{nodes, health, quotaSignalCounts, poolConfig, lastAppliedAt, summary}`; events filter `nodeId`/`action`/`since`; ringkasan OK/DEGRADED/CRITICAL.
   - **Verify:** curl kedua endpoint.
   - **Dependencies:** Task 8
   - **Files:** `fleet-panel-routes.js` (baru), `server.js`
