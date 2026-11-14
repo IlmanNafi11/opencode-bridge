@@ -27,7 +27,7 @@
 
 ## Phase 2: Reachability
 
-- [ ] Task 3: Module `probe.js` — `probeNode(node)`
+- [x] Task 3: Module `probe.js` — `probeNode(node)`
   - **Acceptance:** menangani `direct-proxy`, `ssh-reverse-tunnel`, `wireguard`; node `pending`/`unknown` → `{ok:false}`; `warp` skip; `relay-http` HTTP GET; tulis ke `node_health`.
   - **Verify:** smoke host yang tidak ada → `{ok:false}`; node tunnel → `{ok:true}`.
   - **Files:** `probe.js` (baru), `fleet.js`, `SPEC-FLEET-C2.md`
