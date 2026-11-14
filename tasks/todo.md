@@ -110,7 +110,7 @@
 
 ## Phase 6: Ops + maintenance
 
-- [ ] Task 10: AutoActions & notifikasi
+- [x] Task 10: AutoActions & notifikasi
   - **Acceptance:** notifikasi saat cooling/kuota habis/pool kosong (dalam konfigurasi); penskalaan toggle; opsional.
   - **Verify:** smoke kondisi → log.
   - **Dependencies:** Task 8

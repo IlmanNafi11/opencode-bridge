@@ -178,13 +178,13 @@
 
 ### Phase 6: Ops + maintenance
 
-- [ ] Task 10: AutoActions & notifikasi
+- [x] Task 10: AutoActions & notifikasi
   - **Description:** Opsional: buat notifikasi ke `notify.js` saat node masuk cooling, pool kosong, atau kuota habis (panggil dari `fleet.js` callback). Penskalaan dasar: aktifkan node cadangan bila `applyToPool` kosong & ada node dengan `connect_kind` yang siap. Log icelandic.
   - **Acceptance criteria:**
-    - [ ] Notifikasi dikirim saat kondisi yang ditentukan (tergantung konfigurasi operator).
-    - [ ] Penskalaan hanya aktif bila operator mengaktifkannya (env toggle).
+    - [x] Notifikasi dikirim saat kondisi yang ditentukan (tergantung konfigurasi operator).
+    - [x] Penskalaan hanya aktif bila operator mengaktifkannya (env toggle).
   - **Verification:**
-    - [ ] Smoke: set kondisi → log notifikasi.
+    - [x] Smoke: set kondisi → log notifikasi.
   - **Dependencies:** Task 8
   - **Files:** `fleet.js`, `notify.js`, `server.js` (opt)
   - **Estimated scope:** S (1–2 files)
