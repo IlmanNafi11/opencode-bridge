@@ -42,8 +42,8 @@
   - **Scope:** S (1–2 files)
 
 ### Checkpoint: Reachability
-- [ ] Probe berjalan.
-- [ ] `node_health` ter-update.
+- [x] Probe berjalan.
+- [x] `node_health` ter-update.
 - [ ] Review manusia sebelum Fase 3.
 
 ---
