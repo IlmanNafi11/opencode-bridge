@@ -11,8 +11,9 @@
  * `node_health.cooling_until`（来自 kuota sinyal），不重实现代理冷却。
  */
 const fleet = require("./fleet");
-const proxy = require("./proxy");
-const warpFarm = require("./warp-farm");
+
+// proxy/warp-farm 延迟 require：server.js 的旧安装可能缺 proxy.js，
+// 顶层 require 会让 `加载本地模块` 的兜底失效（参考 warp-farm.js 同样的做法）。
 
 /** 这些接法绝不进 `proxy.json`：未就绪、本质 relay、或 farm 已自管。 */
 const 排除接法 = new Set(["pending", "unknown", "relay-http", "warp"]);
@@ -119,6 +120,8 @@ function applyToPool(opts = {}) {
     nodeIds.push(node.id);
   }
 
+  const proxy = require("./proxy");
+  const warpFarm = require("./warp-farm");
   const farmStatus = opts.farmStatus !== undefined ? opts.farmStatus : warpFarm.状态();
   const farmEntries = farm条目(farmStatus);
   const farmIds = farmEntries.map((e) => e.id);

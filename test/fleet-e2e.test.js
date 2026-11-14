@@ -224,3 +224,50 @@ describe("/api/fleet/health-monitor", () => {
     assert.equal(r.headers.allow, "POST");
   });
 });
+
+describe("/api/fleet/apply-pool", () => {
+  let port;
+  let server;
+
+  before(async () => {
+    await new Promise((resolve) => {
+      server = srv.server.listen(0, "127.0.0.1", () => {
+        port = server.address().port;
+        resolve();
+      });
+    });
+  });
+
+  after(async () => {
+    if (typeof fleet.close === "function") fleet.close();
+    await new Promise((resolve) => server.close(resolve));
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it("applies the reachable node to the proxy pool and reports pool summary", async () => {
+    const reg = await request(port, "POST", "/api/fleet/register", {
+      label: "apply-vps-1",
+      node_type: "vps-public",
+      connect_kind: "direct-proxy",
+      egress_spec: { proxyUrl: "http://127.0.0.1:3128" },
+    });
+    assert.equal(reg.status, 200, JSON.stringify(reg.body));
+    assert.equal(fleet.updateNode(reg.body.nodeId, { reachable: true }).ok, true);
+
+    const r = await request(port, "POST", "/api/fleet/apply-pool", {});
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(r.body.ok, true);
+    assert.equal(r.body.entryCount, 1);
+    assert.equal(r.body.nodeCount, 1);
+    assert.equal(typeof r.body.farmCount, "number");
+    assert.equal(r.body.strategy, "round-robin");
+    assert.ok(r.body.nodeIds.includes(reg.body.nodeId));
+    assert.ok(r.body.lastAppliedAt);
+  });
+
+  it("is locked to POST", async () => {
+    const r = await request(port, "GET", "/api/fleet/apply-pool");
+    assert.equal(r.status, 405);
+    assert.equal(r.headers.allow, "POST");
+  });
+});

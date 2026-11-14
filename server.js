@@ -132,6 +132,10 @@ const HEALTH_MONITOR_FALLBACK = {
   runOnce: async () => ({ ok: false, error: { message: "fleet-health-monitor.js 未安装", type: "unavailable", code: "monitor_unavailable" } }),
 };
 const fleetMonitor = 加载本地模块("fleet-health-monitor", HEALTH_MONITOR_FALLBACK);
+// 池编排：fleet registry → proxy.setPool()。缺失时接口如实返回不可用。
+const 舰队编排 = 加载本地模块("fleet-orchestrator", {
+  applyToPool: () => ({ ok: false, error: { message: "fleet-orchestrator.js 未安装", type: "unavailable", code: "orchestrator_unavailable" } }),
+});
 
 const 观测 = require("./observability");
 const 通知 = require("./notify");
@@ -3155,8 +3159,18 @@ async function 处理FleetAPI(req, res, pathname) {
     const result = await fleetMonitor.runOnce();
     return send(result.ok ? 200 : 503, result);
   }
+  if (pathname === "/api/fleet/apply-pool") {
+    const result = 舰队编排.applyToPool();
+    const code = result.error && result.error.code;
+    // pool 被 env 锁是运维意图，不是故障：用 409（与 warp-farm 拒绝一致）。
+    const status = code === "pool_env_locked" ? 409 : result.ok ? 200 : 503;
+    if (result.ok) {
+      console.log(`[fucking-opencode] fleet：/api/fleet/apply-pool → ${result.entryCount} exit`);
+    }
+    return send(status, result);
+  }
 
-   return send(404, { ok: false, error: { message: "Endpoint fleet tidak dikenal.", type: "not_found", code: "not_found" } });
+  return send(404, { ok: false, error: { message: "Endpoint fleet tidak dikenal.", type: "not_found", code: "not_found" } });
 }
 
 /**
@@ -3774,7 +3788,7 @@ async function 处理请求主体(req, res) {
     return;
   }
 
-  if (pathname === "/api/fleet/init" || pathname === "/api/fleet/register" || pathname === "/api/fleet/probe" || pathname === "/api/fleet/health-monitor") {
+  if (pathname === "/api/fleet/init" || pathname === "/api/fleet/register" || pathname === "/api/fleet/probe" || pathname === "/api/fleet/health-monitor" || pathname === "/api/fleet/apply-pool") {
     const denied = adminRequestError(req);
     if (denied) {
       res.writeHead(403, { "Content-Type": "application/json", "Cache-Control": "no-store" });

@@ -78,7 +78,7 @@
   - **Dependencies:** Task 6
   - **Scope:** M (3–5 files)
 
-- [ ] Task 8: Endpoint `/api/fleet/apply-pool`
+- [x] Task 8: Endpoint `/api/fleet/apply-pool`
   - **Acceptance:** POST → `applyToPool()`; admin-only; output `{ok, entryCount, farmCount, strategy}`; error format konsisten.
   - **Verify:** curl.
   - **Dependencies:** Task 7

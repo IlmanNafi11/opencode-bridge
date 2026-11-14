@@ -137,8 +137,7 @@
   - **Files:** `fleet-orchestrator.js` (baru), `server.js`, `fleet.js`
   - **Estimated scope:** M (3–5 files)
 
-- [ ] Task 8: Endpoint `/api/fleet/apply-pool`
-  - **Description:** Tambahkan `/api/fleet/apply-pool` (POST) → panggil `fleet-orchestrator.applyToPool()`. Tekan admin-only. Kembalikan `{ok, entryCount, farmCount, strategy}`.
+- [x] Task 8: Endpoint `/api/fleet/apply-pool`
   - **Acceptance criteria:**
     - [ ] Endpoint jalan dari admin.
     - [ ] Hasil mencerminkan pool baru.
