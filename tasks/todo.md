@@ -71,7 +71,7 @@
 
 ## Phase 4: Pool orchestration
 
-- [ ] Task 7: `fleet-orchestrator.js` — `applyToPool()`
+- [x] Task 7: `fleet-orchestrator.js` — `applyToPool()`
   - **Acceptance:** filter node `reachable=true`, cooling null/<now, bukan pending/unknown/relay-http; gabung WARP farm lane yang ready (`warp-f<n>`); `proxy.setPool()`; env terkunci → reject yang jelas.
   - **Verify:** smoke register node → pool berubah; env terkunci → reject.
   - **Files:** `fleet-orchestrator.js` (baru), `server.js`, `fleet.js`
