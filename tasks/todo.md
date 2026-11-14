@@ -10,7 +10,7 @@
   - **Files:** `fleet.js` (baru), `SPEC-FLEET-C2.md`
   - **Scope:** S (1–2 files)
 
-- [ ] Task 2: Endpoint `/api/fleet/init` & `/api/fleet/register` di server.js
+- [x] Task 2: Endpoint `/api/fleet/init` & `/api/fleet/register` di server.js
   - **Acceptance:** `init` → `{ok:true, dbPath}`; `register` → `{ok:true, nodeId}`; idempotent; format error JSON konsisten; module dimuat via `加载本地模块`.
   - **Verify:** curl dari gateway.
   - **Dependencies:** Task 1

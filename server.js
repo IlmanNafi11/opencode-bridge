@@ -111,6 +111,14 @@ const WARP_FARM_FALLBACK = {
   日志: () => [],
 };
 const warpFarm = 加载本地模块("warp-farm", WARP_FARM_FALLBACK);
+// Fleet Armada Cerdas (C2)：egress 节点注册表 + SQLite 存储。缺失时接口如实
+// 返回不可用，绝不能阻止网关启动。
+const FLEET_FALLBACK = {
+  initDB: () => ({ ok: false, error: { message: "fleet.js 未安装", type: "unavailable", code: "fleet_unavailable" } }),
+  registerNode: () => ({ ok: false, error: { message: "fleet.js 未安装", type: "unavailable", code: "fleet_unavailable" } }),
+};
+const fleet = 加载本地模块("fleet", FLEET_FALLBACK);
+
 const 观测 = require("./observability");
 const 通知 = require("./notify");
 const 诊断包 = require("./diagnostics");
@@ -3032,6 +3040,61 @@ async function 处理代理API(req, res, pathname) {
   return send(400, { error: "请求体须含 'url'（单代理）或 'entries'（代理池）。" });
 }
 
+
+/**
+ * `/api/fleet/*` —— egress 节点注册表（Armada Cerdas C2）。只暴露注册表本身：
+ * 探测、健康循环与池编排在后续阶段接入。管理面门禁（面板会话、Host、JSON
+ * Content-Type）由上游路由统一把守。
+ */
+async function 处理FleetAPI(req, res, pathname) {
+  const send = (status, body) => {
+    res.writeHead(status, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+    res.end(JSON.stringify(body));
+  };
+
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "POST");
+    return send(405, { ok: false, error: { message: "Gunakan POST.", type: "method", code: "method_not_allowed" } });
+  }
+
+  let payload = {};
+  try {
+    const text = await readRequestBody(req, 64 * 1024);
+    payload = text ? JSON.parse(text) : {};
+  } catch (err) {
+    return send(err.statusCode === 413 ? 413 : 400, {
+      ok: false,
+      error: { message: `请求体无效：${err.message}`, type: "validation", code: "bad_body" },
+    });
+  }
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return send(400, { ok: false, error: { message: "请求体必须是 JSON 对象。", type: "validation", code: "bad_body" } });
+  }
+
+  if (pathname === "/api/fleet/init") {
+    const result = fleet.initDB();
+    if (!result.ok) return send(503, result);
+    console.log(`[fucking-opencode] fleet.db siap：${result.dbPath} (v${result.version})`);
+    return send(200, result);
+  }
+
+  if (pathname === "/api/fleet/register") {
+    // 注册是幂等写；先确保 schema 存在，这样半安装或首个调用不报 no such table。
+    const ready = fleet.initDB();
+    if (!ready.ok) return send(503, ready);
+    const result = fleet.registerNode(payload);
+    if (!result.ok) {
+      const code = result.error && result.error.code;
+      const status = code === "label_required" || code === "bad_node_type" ? 400 : 503;
+      return send(status, result);
+    }
+    console.log(`[fucking-opencode] fleet：节点 ${result.nodeId} ${result.created ? "terdaftar" : "diperbarui"}`);
+    return send(200, result);
+  }
+
+  return send(404, { ok: false, error: { message: "Endpoint fleet tidak dikenal.", type: "not_found", code: "not_found" } });
+}
+
 /**
  * `/api/warp` —— 可选的 Cloudflare WARP 管理。默认关闭：连接/断开会改变
  * 整机路由，所以只有 `WARP_MANAGE=1` 时才允许动作，且只驱动主机上已
@@ -3640,6 +3703,29 @@ async function 处理请求主体(req, res) {
     }
     if (req.method === "POST") 审计面板(req, "farm.update", { ok: true });
     处理WARPFarmAPI(req, res).catch((err) => {
+      if (res.headersSent) return res.destroy();
+      res.writeHead(500, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+      res.end(JSON.stringify({ error: `Kesalahan internal: ${err.message}` }));
+    });
+    return;
+  }
+
+  if (pathname === "/api/fleet/init" || pathname === "/api/fleet/register") {
+    const denied = adminRequestError(req);
+    if (denied) {
+      res.writeHead(403, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+      return res.end(JSON.stringify({ error: denied }));
+    }
+    if (!panelAuthorized(req)) return panelUnauthorized(res);
+    if (req.method === "POST") {
+      const type = String(req.headers?.["content-type"] || "").split(";")[0].trim().toLowerCase();
+      if (type !== "application/json") {
+        res.writeHead(415, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+        return res.end(JSON.stringify({ error: "Content-Type harus application/json." }));
+      }
+      审计面板(req, "fleet.update", { ok: true });
+    }
+    处理FleetAPI(req, res, pathname).catch((err) => {
       if (res.headersSent) return res.destroy();
       res.writeHead(500, { "Content-Type": "application/json", "Cache-Control": "no-store" });
       res.end(JSON.stringify({ error: `Kesalahan internal: ${err.message}` }));
