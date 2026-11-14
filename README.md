@@ -360,7 +360,13 @@ The health monitor re-probes every pool-capable node on
 `FLEET_PROBE_INTERVAL_MS` (`unref`ed, so it never keeps the process alive) —
 including nodes that failed last round, otherwise a node could never recover —
 and classifies upstream refusals as `429`, `403`, `quota`, `free-tier`,
-`capacity`, or `ip-abuse`. A signal writes `quota_signals`, sets
+`capacity`, or `ip-abuse`. A `relay-http` refusal carries the gate's own body
+(first 512 bytes) into the classifier, so a `403` that says "free models are
+only available in OpenCode CLI" is recorded as `free-tier` rather than a bare
+status code. Proxy-backed nodes (`direct-proxy`, `ssh-reverse-tunnel`,
+`wireguard`, `tunnel-cf`) go through `proxy.testProxy`, which reports a generic
+"upstream rejected (403)" without the body: they still cool down, but their
+`sig_type` stays coarse. A signal writes `quota_signals`, sets
 `node_health.quota_signal`, and pushes `cooling_until` out by
 `FLEET_COOLDOWN_BASE_MS`. Real request failures feed the same table through the
 egress-failure path, so quota observed on live traffic is not ignored until the

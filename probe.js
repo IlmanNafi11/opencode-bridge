@@ -98,13 +98,18 @@ async function 探测Relay(node, spec, timeoutMs) {
     return result;
   }
   const latencyMs = Date.now() - started;
-  const result = {
-    ok: res.ok,
-    exitIp: null,
-    latencyMs,
-    httpStatus: res.status,
-    error: res.ok ? null : `relay 返回 ${res.status}`,
-  };
+  let error = null;
+  if (!res.ok) {
+    // Gate free-tier/kuota menjelaskan alasannya di body (403/429). Tanpa teks
+    // itu `判断信号` cuma bisa jatuh ke angka status dan sinyalnya salah kelas
+    // (mis. 403 padahal free-tier). Body dibaca terbatas: cukup potongan awal.
+    let detail = "";
+    try {
+      detail = (await res.text()).slice(0, 512).replace(/\s+/g, " ").trim();
+    } catch {}
+    error = detail ? `relay 返回 ${res.status}: ${detail}` : `relay 返回 ${res.status}`;
+  }
+  const result = { ok: res.ok, exitIp: null, latencyMs, httpStatus: res.status, error };
   记录探测(node, result);
   return result;
 }

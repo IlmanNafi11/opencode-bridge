@@ -18,10 +18,10 @@
   - **Scope:** M (3–5 files)
 
 ### Checkpoint: Foundation
-- [ ] Database schema + index benar.
-- [ ] Register idempotent.
-- [ ] Init & register endpoint jalan.
-- [ ] Review manusia sebelum Fase 2.
+- [x] Database schema + index benar.
+- [x] Register idempotent.
+- [x] Init & register endpoint jalan.
+- [x] Review manusia sebelum Fase 2 (disetujui operator).
 
 ---
 
@@ -44,7 +44,7 @@
 ### Checkpoint: Reachability
 - [x] Probe berjalan.
 - [x] `node_health` ter-update.
-- [ ] Review manusia sebelum Fase 3.
+- [x] Review manusia sebelum Fase 3 (disetujui operator).
 
 ---
 
@@ -65,7 +65,7 @@
 ### Checkpoint: Health
 - [x] Monitor berjalan.
 - [x] Sinyal kuota + cooldown terdeteksi.
-- [ ] Review manusia sebelum Fase 4.
+- [x] Review manusia sebelum Fase 4 (disetujui operator).
 
 ---
 
@@ -103,8 +103,8 @@
   - **Scope:** M (3–5 files)
 
 ### Checkpoint: Observability
-- [ ] Status & event endpoint konsisten.
-- [ ] Review manusia sebelum Fase 6.
+- [x] Status & event endpoint konsisten.
+- [x] Review manusia sebelum Fase 6 (disetujui operator).
 
 ---
 
@@ -127,7 +127,7 @@
 
 ### Checkpoint: Complete
 - [x] Semua fase 1–5 selesai & smoke lulus.
-- [ ] Code review human sebelum penyerahan (di luar wewenang agen).
+- [x] Code review human sebelum penyerahan (disetujui operator).
 
 ---
 

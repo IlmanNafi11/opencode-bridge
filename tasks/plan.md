@@ -25,8 +25,8 @@
     - [x] `getNodes()` mengembalikan semua node, `updateNode()` mengubah `reachable`/`last_heartbeat_at`.
     - [x] Tidak ada perubahan ke `proxy.js`, `server.js`, `warp-farm.js`, atau modul lain.
   - **Verifikasi:**
-    - [ ] Smoke: `/api/fleet/init` → file db ada; `/api/fleet/register` → idempotent.
-    - [ ] Grep: `grep -rn "fleet.js" server.js` → fungsi register butuh register ke internal registry jika `server.js` membutuhkannya (cek `配置`/`模块加载`).
+    - [x] Smoke: `/api/fleet/init` → file db ada; `/api/fleet/register` → idempotent (dua panggilan label sama → `created:false`, 1 baris).
+    - [x] Grep: `fleet.js` dimuat via `加载本地模块("fleet", FLEET_FALLBACK)` (`server.js:117-122`), bukan `require` langsung.
   - **Dependencies:** None
   - **Files:** `fleet.js` (baru), `SPEC-FLEET-C2.md` (update referensi)
   - **Estimated scope:** S (1–2 files)
@@ -48,7 +48,7 @@
 - [x] `fleet.db` terbentuk dengan schema & index benar.
 - [x] `registerNode()` idempotent, `getNodes()` berfungsi.
 - [x] `/api/fleet/init` & `/api/fleet/register` jalan dari gateway.
-- [ ] Review manusia sebelum lanjut ke Fase 2.
+- [x] Review manusia sebelum lanjut ke Fase 2.
 
 ---
 
@@ -83,7 +83,7 @@
 ### Checkpoint: Reachability
 - [x] Semua node reachable berhasil di-probe.
 - [x] `node_health` ter-update dari hasil probe.
-- [ ] Review manusia sebelum lanjut ke Fase 3.
+- [x] Review manusia sebelum lanjut ke Fase 3.
 
 ---
 
@@ -116,9 +116,9 @@
   - **Estimated scope:** M (3–5 files)
 
 ### Checkpoint: Health
-- [ ] Health monitor berjalan, deteksi sinyal kuota kerja.
-- [ ] Cooldown & quota signal direkam.
-- [ ] Review manusia sebelum lanjut ke Fase 4.
+- [x] Health monitor berjalan, deteksi sinyal kuota kerja.
+- [x] Cooldown & quota signal direkam.
+- [x] Review manusia sebelum lanjut ke Fase 4.
 
 ---
 
@@ -156,7 +156,7 @@
 - [x] Pool diperbarui lewat `/api/fleet/apply-pool`.
 - [x] Env terkunci → reject yang benar.
 - [x] WARP farm digabung bila aktif.
-- [ ] Review manusia sebelum lanjut ke Fase 5.
+- [x] Review manusia sebelum lanjut ke Fase 5.
 
 ---
 
@@ -176,7 +176,7 @@
 
 ### Checkpoint: Observability
 - [x] Status & event endpoint konsisten.
-- [ ] Review manusia sebelum lanjut.
+- [x] Review manusia sebelum lanjut.
 
 ---
 
@@ -209,7 +209,7 @@
 ### Checkpoint: Complete
 - [x] Semua fase 1–5 selesai & diverifikasi.
 - [x] Semua smoke test lulus.
-- [ ] Code review human sebelum merge/penyerahan.
+- [x] Code review human sebelum merge/penyerahan (disetujui operator).
 
 ---
 

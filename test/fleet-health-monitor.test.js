@@ -48,10 +48,11 @@ test(
   { skip: 需要Bun },
   async () => {
     设置目录();
-    // relay diskalakan merespons 429 → deterministic, tanpa proxy nyata.
+    // relay diskalakan merespons 429 tanpa kata kuota di body → satu-satunya
+    // sinyal adalah kode status, jadi sig_type jatuh ke "429".
     const relay = http.createServer((req, res) => {
       res.writeHead(429, { "Content-Type": "application/json" });
-      res.end('{"error":"quota"}');
+      res.end('{"error":"rate limited"}');
     });
     await new Promise((resolve) => relay.listen(0, "127.0.0.1", resolve));
     const relayPort = relay.address().port;
@@ -79,6 +80,45 @@ test(
       assert.ok(h.cooling_until, "cooling_until harus terisi");
       assert.equal(h.block_based_on_quota, true);
       assert.equal(h.quota_signal, "429");
+    } finally {
+      relay.close();
+      恢复目录();
+    }
+  }
+);
+
+test(
+  "runOnce mengklasifikasi body gate relay, bukan sekadar kode status",
+  { skip: 需要Bun },
+  async () => {
+    设置目录();
+    // Gate free-tier menjawab 403 dengan teks penjelas; probe harus meneruskan
+    // teks itu supaya sig_type jadi "free-tier", bukan angka status mentah.
+    const relay = http.createServer((req, res) => {
+      res.writeHead(403, { "Content-Type": "text/plain" });
+      res.end("Free models are only available in OpenCode CLI.");
+    });
+    await new Promise((resolve) => relay.listen(0, "127.0.0.1", resolve));
+    const relayPort = relay.address().port;
+    try {
+      fleet.initDB();
+      const reg = fleet.registerNode({
+        label: "relay-gate",
+        node_type: "runner-free",
+        connect_kind: "relay-http",
+        egress_spec: { proxyUrl: `http://127.0.0.1:${relayPort}`, probePath: "/" },
+      });
+      assert.equal(reg.ok, true, JSON.stringify(reg));
+
+      const r = await monitor.runOnce();
+      assert.equal(r.ok, true, JSON.stringify(r));
+
+      const signals = fleet.readQuotaSignals();
+      assert.equal(signals.length, 1);
+      assert.equal(signals[0].sig_type, "free-tier", `dapat: ${JSON.stringify(signals)}`);
+
+      const h = fleet.readHealthSummaries().find((x) => x.node_id === reg.nodeId);
+      assert.equal(h.quota_signal, "free-tier");
     } finally {
       relay.close();
       恢复目录();

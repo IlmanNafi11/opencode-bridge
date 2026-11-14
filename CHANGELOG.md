@@ -45,6 +45,16 @@ Fleet C2 egress registry (Armada Cerdas), optional:
   now select nodes by `connect_kind` rather than by `reachable`, so a failed
   node is re-probed and can recover, and auto-scale no longer treats a
   probed-dead node as standby.
+- **Relay probe keeps the gate's own words.** `probe.js` used to throw away the
+  `relay-http` response body, so a `403` reading "Free models are only
+  available in OpenCode CLI" was classified from the status code alone and
+  landed in `quota_signals.sig_type` as `403` instead of `free-tier`. The
+  probe now forwards up to 512 bytes of the body, so the classifier sees the
+  gate text and records the specific signal. Known limit: on the
+  `direct-proxy` / `ssh-reverse-tunnel` / `wireguard` paths `proxy.testProxy`
+  still reports a generic "upstream rejected (403)" without the body, so those
+  nodes get cooldown but a coarse `403` signal — fixing that requires changing
+  `proxy.js`, which the fleet layer deliberately does not touch.
 
 ## [0.1.6] — 2026-11-11
 
