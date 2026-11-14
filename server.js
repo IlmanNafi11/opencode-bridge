@@ -141,6 +141,11 @@ const fleetPanelRoutes = 加载本地模块("fleet-panel-routes", {
   fleetStatus: () => ({ ok: false, error: { message: "fleet-panel-routes.js 未安装", type: "unavailable", code: "panel_unavailable" } }),
   fleetEvents: () => ({ ok: false, error: { message: "fleet-panel-routes.js 未安装", type: "unavailable", code: "panel_unavailable" } }),
 });
+// Auto actions fleet: notifikasi cooling/pool-kosong + aktivasi cadangan (opsional).
+const fleetAutoactions = 加载本地模块("fleet-autoactions", {
+  节拍: async () => ({ ok: true, enabled: false }),
+  __reset: () => {},
+});
 
 const 观测 = require("./observability");
 const 通知 = require("./notify");
@@ -6123,6 +6128,11 @@ if (require.main === module) {
     } catch {}
     try {
       备份.节拍();
+    } catch {}
+    try {
+      fleetAutoactions
+        .节拍({ notify: 通知, applyPool: () => 舰队编排.applyToPool() })
+        .catch(() => {});
     } catch {}
   }, 60000).unref();
   // Fleet health monitor：探测 semua node siap tiap interval (default 5 menit),
