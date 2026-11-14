@@ -55,7 +55,7 @@
   - **Dependencies:** Task 4
   - **Scope:** M (3–5 files)
 
-- [ ] Task 6: Sinkronisasi sinyal kuota dari request nyata
+- [x] Task 6: Sinkronisasi sinyal kuota dari request nyata
   - **Acceptance:** `server.js` hook `记录出口失败` → `fleet.onRequestQuotaSignal(...)`; `quota_signals` bertambah; cooldown bila diperlukan.
   - **Verify:** smoke request yang gagal dengan sinyal kuota → catatan bertambah.
   - **Dependencies:** Task 5

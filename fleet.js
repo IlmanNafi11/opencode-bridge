@@ -26,6 +26,7 @@ const 数据库文件名 = "fleet.db";
 const 数据库版本号 = 1;
 const 忙等待毫秒 = 5000;
 const 节点类型 = new Set(["vps-public", "vps-nat", "runner-free", "warp", "other"]);
+const 冷却基数毫秒 = () => Number(process.env.FLEET_COOLDOWN_BASE_MS || 120000);
 
 /** SQLite 连接按路径缓存：同一进程内复用，测试换 state dir 时自然分家。 */
 let 连接 = null;
@@ -343,6 +344,42 @@ function readQuotaSignals({ nodeId = null, since = null, limit = 100 } = {}) {
     return [];
   }
 }
+/**
+ * Sinkronisasi sinyal kuota dari request nyata (hook 记录出口失败 di server.js).
+ * Cocokkan URL egress ke node terdaftar; kalau ketemu, catat sinyal + set
+ * cooldown (block_based_on_quota). URL tak terdaftar → matched:false, no-op.
+ */
+function onRequestQuotaSignal({ proxyUrl = null, sigType = "quota" } = {}) {
+  const db = 打开DB();
+  if (!db) return { matched: false, ok: false, error: 不可用().error };
+  const url = String(proxyUrl || "").trim();
+  if (!url) return { matched: false, ok: true };
+  try {
+    const rows = db.query("SELECT id, label FROM nodes WHERE egress_spec IS NOT NULL").all();
+    const node = rows
+      .map((r) => {
+        let spec = {};
+        try { spec = JSON.parse(db.query("SELECT egress_spec FROM nodes WHERE id = ?").get(r.id).egress_spec || "{}"); } catch {}
+        return { ...r, spec };
+      })
+      .find((r) => String(r.spec.proxyUrl || "").trim() === url);
+    if (!node) return { matched: false, ok: true };
+
+    const sig = String(sigType || "quota");
+    const wrote = writeQuotaSignal({ nodeId: node.id, label: node.label, sigType: sig });
+    if (!wrote.ok) return { matched: true, ok: false, error: wrote.error };
+    const 冷却至 = new Date(Date.now() + 冷却基数毫秒()).toISOString();
+    const health = writeHealth({
+      nodeId: node.id,
+      coolingUntil: 冷却至,
+      quotaSignal: sig,
+      blockBasedOnQuota: true,
+    });
+    return { matched: true, ok: health.ok, nodeId: node.id };
+  } catch (err) {
+    return { matched: false, ok: false, error: { message: `onRequestQuotaSignal gagal: ${err.message}`, type: "sqlite", code: "signal_failed" } };
+  }
+}
 
 function writeQuotaSignal({ nodeId = null, label = null, sigType = "quota", weight = 1 } = {}) {
   const db = 打开DB();
@@ -439,6 +476,7 @@ module.exports = {
   writeEvent,
   writeQuotaSignal,
   readQuotaSignals,
+  onRequestQuotaSignal,
   writeHealth,
   readHealthSummaries,
   DBPath,

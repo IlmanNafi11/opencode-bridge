@@ -1257,6 +1257,20 @@ async function 出口抓取(url, init, state) {
  * 空 URL 是 `direct` 池条目，它是真实出口，所以不能用真值
  * 判断：只有缺状态才表示"没东西可记"。
  */
+/** Mappakan reason 出口 → sig_type kuota (429/quota/free-tier/capacity/ip-abuse). */
+function 分类配额信号(reason) {
+  if (reason == null) return null;
+  const text = String(reason);
+  if (/ip-abuse/i.test(text)) return "ip-abuse";
+  if (/free.?tier/i.test(text)) return "free-tier";
+  if (/allowance.*429|^429$/i.test(text)) return "429";
+  if (/capacity/i.test(text)) return "capacity";
+  if (/gate 429/i.test(text)) return "capacity";
+  if (/gate 403/i.test(text)) return "free-tier";
+  if (/quota|kuota|exceed/i.test(text)) return "quota";
+  return null;
+}
+
 function 记录出口失败(state, { reason, cooldownMs = null } = {}) {
   const url = state && state.egressUrl;
   if (url === null || url === undefined) return;
@@ -1265,6 +1279,13 @@ function 记录出口失败(state, { reason, cooldownMs = null } = {}) {
   proxy.markFailure(url, { reason, cooldownMs });
   if (state.traceId) 观测.出口事件(state.traceId, { exit: egressLabelForStats(state.egress), action: "fail", reason });
   可能轮换WARP出口(url, reason);
+  // Fleet: sinkronkan sinyal kuota dari request nyata ke node terdaftar.
+  const sig = 分类配额信号(reason);
+  if (sig && typeof fleet.onRequestQuotaSignal === "function") {
+    try {
+      fleet.onRequestQuotaSignal({ proxyUrl: url, sigType: sig });
+    } catch {}
+  }
 }
 
 /**
@@ -6130,4 +6151,5 @@ module.exports = {
   __localRequires: 本地require,
   __repairMissingModules: repairMissingModules,
   __adminRequestError: adminRequestError,
+  分类配额信号,
 };
