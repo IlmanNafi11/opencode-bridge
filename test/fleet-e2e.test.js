@@ -119,3 +119,73 @@ describe("/api/fleet/* HTTP surface", () => {
     assert.equal(res.status, 405);
   });
 });
+
+describe("/api/fleet/probe", () => {
+  let port;
+  let server;
+  let nodeId;
+
+  before(async () => {
+    await new Promise((resolve) => {
+      server = srv.server.listen(0, "127.0.0.1", () => {
+        port = server.address().port;
+        resolve();
+      });
+    });
+    const r1 = await request(port, "POST", "/api/fleet/register", {
+      label: "probe-vps-1",
+      node_type: "vps-public",
+      connect_kind: "direct-proxy",
+      egress_spec: { proxyUrl: "http://127.0.0.1:1" },
+    });
+    assert.equal(r1.status, 200, JSON.stringify(r1.body));
+    nodeId = r1.body.nodeId;
+    await request(port, "POST", "/api/fleet/register", {
+      label: "probe-vps-pending",
+      node_type: "vps-nat",
+      connect_kind: "pending",
+      egress_spec: {},
+    });
+  });
+
+  after(async () => {
+    if (typeof fleet.close === "function") fleet.close();
+    await new Promise((resolve) => server.close(resolve));
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it("probes all eligible nodes when no nodeId is given, skipping pending", async () => {
+    const r = await request(port, "POST", "/api/fleet/probe", {});
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(r.body.ok, true);
+    assert.ok(Array.isArray(r.body.results));
+    const ids = r.body.results.map((x) => x.nodeId);
+    assert.ok(!ids.includes("probe-vps-pending"), `pending node harus dilewati, dapat: ${ids.join(",")}`);
+    assert.ok(ids.includes(nodeId), `node eligible harus di-probe, dapat: ${ids.join(",")}`);
+  });
+
+  it("probes a single node by nodeId and records its health", async () => {
+    const r = await request(port, "POST", "/api/fleet/probe", { nodeId });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(r.body.ok, true);
+    assert.equal(r.body.results.length, 1);
+    assert.equal(r.body.results[0].nodeId, nodeId);
+    const h = fleet.readHealthSummaries().find((x) => x.node_id === nodeId);
+    assert.ok(h, "node_health harus terisi");
+    assert.equal(h.ok, false, "proxy ke port mati harus tercatat tidak reachable");
+    assert.ok(h.error, "error harus ada");
+  });
+
+  it("returns structured 404 for an unknown nodeId", async () => {
+    const r = await request(port, "POST", "/api/fleet/probe", { nodeId: "tidak-ada" });
+    assert.equal(r.status, 404);
+    assert.equal(r.body.ok, false);
+    assert.equal(r.body.error.code, "not_found");
+  });
+
+  it("is locked to POST", async () => {
+    const r = await request(port, "GET", "/api/fleet/probe");
+    assert.equal(r.status, 405);
+    assert.equal(r.headers.allow, "POST");
+  });
+});

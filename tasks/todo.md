@@ -34,7 +34,7 @@
   - **Dependencies:** Task 2
   - **Scope:** M (3–5 files)
 
-- [ ] Task 4: Endpoint `/api/fleet/probe`
+- [x] Task 4: Endpoint `/api/fleet/probe`
   - **Acceptance:** POST tanpa body → probe semua node `reachable=true`; body `{nodeId}` → per-node; hasil mencerminkan `node_health`.
   - **Verify:** curl.
   - **Dependencies:** Task 3

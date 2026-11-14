@@ -116,8 +116,15 @@ const warpFarm = 加载本地模块("warp-farm", WARP_FARM_FALLBACK);
 const FLEET_FALLBACK = {
   initDB: () => ({ ok: false, error: { message: "fleet.js 未安装", type: "unavailable", code: "fleet_unavailable" } }),
   registerNode: () => ({ ok: false, error: { message: "fleet.js 未安装", type: "unavailable", code: "fleet_unavailable" } }),
+  getNodes: () => [],
+  getNode: () => null,
 };
 const fleet = 加载本地模块("fleet", FLEET_FALLBACK);
+// 可达性探测：node → health。缺失时接口如实返回不可用。
+const PROBE_FALLBACK = {
+  probeNode: async () => ({ ok: false, error: { message: "probe.js 未安装", type: "unavailable", code: "probe_unavailable" } }),
+};
+const 探针 = 加载本地模块("probe", PROBE_FALLBACK);
 
 const 观测 = require("./observability");
 const 通知 = require("./notify");
@@ -3092,6 +3099,28 @@ async function 处理FleetAPI(req, res, pathname) {
     return send(200, result);
   }
 
+  if (pathname === "/api/fleet/probe") {
+    const ready = fleet.initDB();
+    if (!ready.ok) return send(503, ready);
+    // body {nodeId?}：缺省探测所有 reachable=true 的节点；probeNode 自己再
+    // 跳过 pending/unknown/warp，所以这里只管按可达性初筛。
+    if (payload.nodeId) {
+      const node = fleet.getNode(payload.nodeId);
+      if (!node) {
+        return send(404, { ok: false, error: { message: `node tidak ditemukan: ${payload.nodeId}`, type: "not_found", code: "not_found" } });
+      }
+      const verdict = await 探针.probeNode(node);
+      return send(200, { ok: true, results: [{ nodeId: node.id, ...verdict }] });
+    }
+    // "probe semua" hanya menjaring node yang probeNode akan kerjakan: pending/
+    // unknown belum siap, warp diurus farm. relay-http tetap ikut (probeNode GET).
+    const 跳过 = new Set(["pending", "unknown", "warp"]);
+    const nodes = fleet.getNodes().filter((n) => n.reachable === true && !跳过.has(n.connect_kind));
+    const results = await Promise.all(
+      nodes.map(async (n) => ({ nodeId: n.id, ...(await 探针.probeNode(n)) }))
+    );
+    return send(200, { ok: true, results });
+  }
   return send(404, { ok: false, error: { message: "Endpoint fleet tidak dikenal.", type: "not_found", code: "not_found" } });
 }
 
@@ -3710,7 +3739,7 @@ async function 处理请求主体(req, res) {
     return;
   }
 
-  if (pathname === "/api/fleet/init" || pathname === "/api/fleet/register") {
+  if (pathname === "/api/fleet/init" || pathname === "/api/fleet/register" || pathname === "/api/fleet/probe") {
     const denied = adminRequestError(req);
     if (denied) {
       res.writeHead(403, { "Content-Type": "application/json", "Cache-Control": "no-store" });
