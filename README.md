@@ -350,13 +350,21 @@ caller.
 | `pending`, `unknown` | skipped | never |
 | `warp` | skipped — `warp-farm.js` owns lane state | via the farm lanes merged by the orchestrator |
 
-The health monitor probes every reachable node on `FLEET_PROBE_INTERVAL_MS`
-(`unref`ed, so it never keeps the process alive) and classifies upstream
-refusals as `429`, `403`, `quota`, `free-tier`, `capacity`, or `ip-abuse`. A
-signal writes `quota_signals`, sets `node_health.quota_signal`, and pushes
-`cooling_until` out by `FLEET_COOLDOWN_BASE_MS`. Real request failures feed the
-same table through the egress-failure path, so quota observed on live traffic is
-not ignored until the next probe.
+Every probe writes back to the registry: success sets `nodes.reachable = true`
+and stamps `last_heartbeat_at`, failure sets `reachable = false`. Those probe
+results — not the `reachable` flag you registered with — decide what
+`apply-pool` may publish, so a node whose tunnel dies drops out of the pool on
+the next probe instead of serving dead exits.
+
+The health monitor re-probes every pool-capable node on
+`FLEET_PROBE_INTERVAL_MS` (`unref`ed, so it never keeps the process alive) —
+including nodes that failed last round, otherwise a node could never recover —
+and classifies upstream refusals as `429`, `403`, `quota`, `free-tier`,
+`capacity`, or `ip-abuse`. A signal writes `quota_signals`, sets
+`node_health.quota_signal`, and pushes `cooling_until` out by
+`FLEET_COOLDOWN_BASE_MS`. Real request failures feed the same table through the
+egress-failure path, so quota observed on live traffic is not ignored until the
+next probe.
 
 `POST /api/fleet/apply-pool` filters nodes to reachable, not cooling, and
 pool-capable kinds, merges ready WARP farm lanes as `warp-f<n>`, and calls
@@ -373,8 +381,9 @@ the other admin routes.
 
 Auto-actions are opt-in: `FLEET_AUTO_ACTIONS=1` notifies on a node entering
 cooldown and on an empty pool; `FLEET_AUTO_SCALE=1` additionally re-enables one
-standby node (registered but not reachable, with a usable proxy URL) when the
-pool is empty.
+standby node when the pool is empty. A standby is a node registered with
+`reachable: false` that has never failed a probe; a node that failed its last
+probe has a failing `node_health` row and is never resurrected this way.
 
 `fleet.db` is not part of `/api/backup` or the self-updater file set: back it up
 by copying the file while the gateway is stopped (WAL checkpointed), and keep it

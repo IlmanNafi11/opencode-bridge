@@ -31,85 +31,86 @@
   - **Files:** `fleet.js` (baru), `SPEC-FLEET-C2.md` (update referensi)
   - **Estimated scope:** S (1–2 files)
 
-- [ ] Task 2: Endpoint init & register di server.js
+- [x] Task 2: Endpoint init & register di server.js
   - **Description:** Daftarkan `/api/fleet/init` (POST) dan `/api/fleet/register` (POST) di dalam rantai route `/api/*` yang sudah ada di `server.js` (gaya yang sama dengan `/api/observability`, `/api/proxy`, dst). Respons format JSON `{ok, ...}` / `{error:{message,type,code}}` seperti modul lain.
   - **Acceptance criteria:**
-    - [ ] `/api/fleet/init` → `{ok:true, dbPath}`.
-    - [ ] `/api/fleet/register` dengan `{label, node_type, connect_kind, egress_spec, tags?}` → `{ok:true, nodeId}`, id dibuat server-side, idempotent.
-    - [ ] Endpoint hanya bisa diakses dari session admin (cek pola di bagian route: `dashboardApi.处理` atau admin guard).
-    - [ ] Module `fleet.js` dimuat via `加载本地模块("fleet", FALLBACK_FLEET)` di `server.js`.
+    - [x] `/api/fleet/init` → `{ok:true, dbPath}`.
+    - [x] `/api/fleet/register` dengan `{label, node_type, connect_kind, egress_spec, tags?}` → `{ok:true, nodeId}`, id dibuat server-side, idempotent.
+    - [x] Endpoint hanya bisa diakses dari session admin (cek pola di bagian route: `dashboardApi.处理` atau admin guard).
+    - [x] Module `fleet.js` dimuat via `加载本地模块("fleet", FALLBACK_FLEET)` di `server.js`.
   - **Verifikasi:**
-    - [ ] Run gateway, curl `/api/fleet/init` & `/api/fleet/register` → tampilan respons sesuai akseptansi.
+    - [x] Run gateway, curl `/api/fleet/init` & `/api/fleet/register` → tampilan respons sesuai akseptansi.
   - **Dependencies:** Task 1
   - **Files:** `server.js`, `fleet.js`
   - **Estimated scope:** M (3–5 files)
 
 ### Checkpoint: Foundation
-- [ ] `fleet.db` terbentuk dengan schema & index benar.
-- [ ] `registerNode()` idempotent, `getNodes()` berfungsi.
-- [ ] `/api/fleet/init` & `/api/fleet/register` jalan dari gateway.
+- [x] `fleet.db` terbentuk dengan schema & index benar.
+- [x] `registerNode()` idempotent, `getNodes()` berfungsi.
+- [x] `/api/fleet/init` & `/api/fleet/register` jalan dari gateway.
 - [ ] Review manusia sebelum lanjut ke Fase 2.
 
 ---
 
 ### Phase 2: Reachability — probe node
 
-- [ ] Task 3: Module `probe.js` — `probeNode(node)`
+- [x] Task 3: Module `probe.js` — `probeNode(node)`
   - **Description:** Buat `probe.js` yang mengekspor `probeNode(node)`. Membaca `node.connect_kind` dan `node.egress_spec.proxyUrl`, mengeksekusi probe menggunakan mekanisme yang ada dan menulis hasil ke format `{ok, exitIp, latencyMs, httpStatus, error}`. Node `pending`/`unknown` → `{ok:false, error:"..."}`. `warp` → skip probe manual (farm sudah punya status). `relay-http` → HTTP GET ke URL relay.
   - **Acceptance criteria:**
-    - [ ] `probeNode()` menangani `direct-proxy`, `ssh-reverse-tunnel`, `wireguard`.
-    - [ ] Node tidak reachable/format salah → `{ok:false, error}`.
-    - [ ] Hasil ditulis ke `node_health` via `fleet.writeHealth()`.
-    - [ ] Tidak mengubah `proxy.js` atau `warp-farm.js`.
+    - [x] `probeNode()` menangani `direct-proxy`, `ssh-reverse-tunnel`, `wireguard`.
+    - [x] Node tidak reachable/format salah → `{ok:false, error}`.
+    - [x] Hasil ditulis ke `node_health` via `fleet.writeHealth()`.
+    - [x] Tidak mengubah `proxy.js` atau `warp-farm.js`.
   - **Verifikasi:**
-    - [ ] Smoke: probe node dummy ke host yang tidak ada → `{ok:false}`.
-    - [ ] Smoke: probe node `socks5://127.0.0.1:9999` (jika tunnel aktif) → `{ok:true, exitIp, latencyMs}`.
+    - [x] Smoke: probe node dummy ke host yang tidak ada → `{ok:false}`.
+    - [x] Probe sukses/gagal menulis balik ke registry (`reachable` + `last_heartbeat_at`).
   - **Dependencies:** Task 2
   - **Files:** `probe.js` (baru), `fleet.js`, `SPEC-FLEET-C2.md`
   - **Estimated scope:** M (3–5 files)
 
-- [ ] Task 4: Endpoint `/api/fleet/probe`
+- [x] Task 4: Endpoint `/api/fleet/probe`
   - **Description:** Tambahkan `/api/fleet/probe` (POST). Body opsional `{nodeId}`: jika kosong, probe semua node yang `reachable=true` (bukan `pending`/`unknown`). Kembalikan daftar hasil per node.
   - **Acceptance criteria:**
-    - [ ] `/api/fleet/probe` tanpa body → daftar semua node yang dijawab probe.
-    - [ ] `/api/fleet/probe?nodeId=x` → probe hanya node yang diminta.
-    - [ ] Hasil mencerminkan `node_health` yang baru.
+    - [x] `/api/fleet/probe` tanpa body → daftar semua node yang dijawab probe.
+    - [x] `/api/fleet/probe?nodeId=x` → probe hanya node yang diminta.
+    - [x] Hasil mencerminkan `node_health` yang baru.
   - **Verifikasi:**
-    - [ ] Run gateway, curl `/api/fleet/probe` → JSON daftar hasil.
+    - [x] Run gateway, curl `/api/fleet/probe` → JSON daftar hasil.
   - **Dependencies:** Task 3
   - **Files:** `server.js`, `fleet.js`, `probe.js`
   - **Estimated scope:** S (1–2 files)
 
 ### Checkpoint: Reachability
-- [ ] Semua node reachable berhasil di-probe.
-- [ ] `node_health` ter-update dari hasil probe.
+- [x] Semua node reachable berhasil di-probe.
+- [x] `node_health` ter-update dari hasil probe.
 - [ ] Review manusia sebelum lanjut ke Fase 3.
 
 ---
 
 ### Phase 3: Health monitoring
 
-- [ ] Task 5: Loop health monitor (`fleet-health-monitor.js`)
+- [x] Task 5: Loop health monitor (`fleet-health-monitor.js`)
   - **Description:** Buat `fleet-health-monitor.js` ekspor `start(intervalMs)` dan `stop()`. Loop setiap interval: baca semua node, lakukan probe, tulis ke `node_health`, deteksi sinyal kuota (respon HTTP 429/403 + keyword kuota/free-tier/capacity/gate → catat `quota_signal`), set cooldown `cooling_until = now + FLEET_COOLDOWN_BASE_MS` saat `block_based_on_quota` naik, update `last_heartbeat_at` bila probe sukses. Gunakan `setInterval` + `unref` (polanya sama dengan `warp-farm.js`/`autoheal.js`).
   - **Acceptance criteria:**
-    - [ ] `start()` jalan tanpa blocking proses (gateway tetap bisa mati secara normal).
-    - [ ] Sinyal kuota terdeteksi dari probe + dari hook request nyata (`onRequestQuotaSignal` di `fleet.js`).
-    - [ ] `quota_signals` bertambah + `node_health.cooling_until` terisi saat sinyal terdeteksi.
+    - [x] `start()` jalan tanpa blocking proses (gateway tetap bisa mati secara normal).
+    - [x] Sinyal kuota terdeteksi dari probe + dari hook request nyata (`onRequestQuotaSignal` di `fleet.js`).
+    - [x] `quota_signals` bertambah + `node_health.cooling_until` terisi saat sinyal terdeteksi.
+    - [x] Probe sukses menstempel `last_heartbeat_at`; monitor tetap mem-probe node yang gagal (recovery).
   - **Verifikasi:**
-    - [ ] Smoke: panggil `/api/fleet/health-monitor` → `node_health` & `quota_signals` berubah.
-    - [ ] Smoke: node dirubah ke 429 (proxy mock / kondisi sengaja) → cooldown tercatat.
+    - [x] Smoke: panggil `/api/fleet/health-monitor` → `node_health` & `quota_signals` berubah.
+    - [x] Smoke: node dirubah ke 429 (proxy mock / kondisi sengaja) → cooldown tercatat.
   - **Dependencies:** Task 4
   - **Files:** `fleet-health-monitor.js` (baru), `fleet.js`, `server.js` (hook)
   - **Estimated scope:** M (3–5 files)
 
-- [ ] Task 6: Sinkronisasi sinyal kuota dari request nyata
+- [x] Task 6: Sinkronisasi sinyal kuota dari request nyata
   - **Description:** Pada `server.js`, di handler `记录出口失败` (saat exit gagal/kuota terisi): cek apakah URL exit cocok dengan node di registry, lalu panggil `fleet.onRequestQuotaSignal(...)` yang menulis ke `quota_signals` + mark `node_health` cooldown jika diperlukan.
   - **Acceptance criteria:**
-    - [ ] Hook jalan saat request nyata gagal dengan sinyal kuota.
-    - [ ] `quota_signals` bertambah sesuai tipe: `429` | `quota` | `free-tier` | `capacity` | `ip-abuse`.
-    - [ ] `node_health.quota_signal` & `block_based_on_quota` terkunci bila diperlukan.
+    - [x] Hook jalan saat request nyata gagal dengan sinyal kuota.
+    - [x] `quota_signals` bertambah sesuai tipe: `429` | `quota` | `free-tier` | `capacity` | `ip-abuse`.
+    - [x] `node_health.quota_signal` & `block_based_on_quota` terkunci bila diperlukan.
   - **Verifikasi:**
-    - [ ] Smoke: request keluar dari node yang terdaftar dan gagal dengan sinyal kuota → catatan `quota_signals` bertambah.
+    - [x] Smoke: request keluar dari node yang terdaftar dan gagal dengan sinyal kuota → catatan `quota_signals` bertambah.
   - **Dependencies:** Task 5
   - **Files:** `server.js`, `fleet.js`
   - **Estimated scope:** M (3–5 files)
@@ -123,16 +124,17 @@
 
 ### Phase 4: Pool orchestration
 
-- [ ] Task 7: `fleet-orchestrator.js` — `applyToPool()`
+- [x] Task 7: `fleet-orchestrator.js` — `applyToPool()`
   - **Description:** Buat `fleet-orchestrator.js` dengan `applyToPool()` yang baca `nodes` + `node_health` dari `fleet.js`, filter `reachable=true`, `cooling_until` null/< sekarang, `connect_kind` bukan `pending`/`unknown`/`relay-http`; baca `warpFarm.状态()` untuk gabungkan lane yang ready sebagai entry `warp-f<n>`; panggil `proxy.setPool()` dengan entry gabungan. Hanya aktif kalau pool berasal dari file (bukan env).
   - **Acceptance criteria:**
-    - [ ] `applyToPool()` menghasilkan entry array gabungan node + farm lane.
-    - [ ] Memanggil `proxy.setPool()` → `proxy.json` diperbarui.
-    - [ ] Env terkunci → `applyToPool()` menolak dengan error yang jelas.
-    - [ ] Selalu ada log/ringkasan entry yang dipakai.
+    - [x] `applyToPool()` menghasilkan entry array gabungan node + farm lane.
+    - [x] Memanggil `proxy.setPool()` → `proxy.json` diperbarui.
+    - [x] Env terkunci → `applyToPool()` menolak dengan error yang jelas.
+    - [x] Selalu ada log/ringkasan entry yang dipakai.
+    - [x] Node yang probe terakhirnya gagal tidak diterbitkan ke pool.
   - **Verifikasi:**
-    - [ ] Smoke: daftarkan 1 node reachable → `proxy.describe().pool.entries` berisi entry baru.
-    - [ ] Smoke: set env `UPSTREAM_PROXY_POOL` → `/api/fleet/apply-pool` menolak.
+    - [x] Smoke: daftarkan 1 node reachable → `proxy.describe().pool.entries` berisi entry baru.
+    - [x] Smoke: set env `UPSTREAM_PROXY_POOL` → `/api/fleet/apply-pool` menolak.
   - **Dependencies:** Task 6
   - **Files:** `fleet-orchestrator.js` (baru), `server.js`, `fleet.js`
   - **Estimated scope:** M (3–5 files)
@@ -149,9 +151,9 @@
   - **Estimated scope:** S (1–2 files)
 
 ### Checkpoint: Pool
-- [ ] Pool diperbarui lewat `/api/fleet/apply-pool`.
-- [ ] Env terkunci → reject yang benar.
-- [ ] WARP farm digabung bila aktif.
+- [x] Pool diperbarui lewat `/api/fleet/apply-pool`.
+- [x] Env terkunci → reject yang benar.
+- [x] WARP farm digabung bila aktif.
 - [ ] Review manusia sebelum lanjut ke Fase 5.
 
 ---
@@ -171,7 +173,7 @@
   - **Estimated scope:** M (3–5 files)
 
 ### Checkpoint: Observability
-- [ ] Status & event endpoint konsisten.
+- [x] Status & event endpoint konsisten.
 - [ ] Review manusia sebelum lanjut.
 
 ---
@@ -203,8 +205,8 @@
   - **Estimated scope:** S (1–2 files)
 
 ### Checkpoint: Complete
-- [ ] Semua fase 1–5 selesai & diverifikasi.
-- [ ] Semua smoke test lulus.
+- [x] Semua fase 1–5 selesai & diverifikasi.
+- [x] Semua smoke test lulus.
 - [ ] Code review human sebelum merge/penyerahan.
 
 ---

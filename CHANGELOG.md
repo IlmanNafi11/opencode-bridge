@@ -35,6 +35,17 @@ Fleet C2 egress registry (Armada Cerdas), optional:
   pool config, last applied, OK/DEGRADED/CRITICAL summary) and
   `GET /api/fleet/events` (filter `nodeId` / `action` / `since`).
 
+### Fixed
+
+- **Probe results now drive the pool.** `probe.js` writes the verdict back to
+  the registry: success sets `nodes.reachable = true` and stamps
+  `last_heartbeat_at`, failure sets `reachable = false`. Previously the verdict
+  only reached `node_health`, so `apply-pool` kept publishing nodes whose
+  tunnel was dead. Both probe paths (`/api/fleet/probe` and the health monitor)
+  now select nodes by `connect_kind` rather than by `reachable`, so a failed
+  node is re-probed and can recover, and auto-scale no longer treats a
+  probed-dead node as standby.
+
 ## [0.1.6] — 2026-11-11
 
 Operations hardening and panel follow-through:
