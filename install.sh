@@ -154,7 +154,7 @@ if [ -n "$PREV_VERSION" ]; then
   say "Found existing install: v$PREV_VERSION in $BINDIR"
   BACKUP="$BINDIR/.backup-v$PREV_VERSION-$(date +%Y%m%d%H%M%S)"
   mkdir -p "$BACKUP"
-  for f in server.js identity.js token-budget.js verify.js gate-drill.js transport-fingerprint.js transport-baseline.json package.json tunnel-doctor.sh proxy.js panel.js panel-avatar.png panel-settings.js config.js model-groups.js socks-bridge.js warp.js warp-farm.js compat.js stats.js egress-proxy.js audit.js autoheal.js backup.js dashboard-api.js diagnostics.js notify.js observability.js ops.js retention.js selftest.js THIRD_PARTY_NOTICES.md; do
+  for f in server.js identity.js token-budget.js verify.js gate-drill.js transport-fingerprint.js transport-baseline.json package.json tunnel-doctor.sh proxy.js panel.js panel-avatar.png panel-settings.js config.js model-groups.js socks-bridge.js warp.js warp-farm.js compat.js stats.js egress-proxy.js audit.js autoheal.js backup.js dashboard-api.js diagnostics.js notify.js observability.js ops.js retention.js selftest.js fleet.js probe.js fleet-health-monitor.js fleet-orchestrator.js fleet-panel-routes.js fleet-autoactions.js THIRD_PARTY_NOTICES.md; do
     [ -f "$BINDIR/$f" ] && cp -p "$BINDIR/$f" "$BACKUP/$f" 2>/dev/null || true
   done
   say "Backed up to $BACKUP"
@@ -425,6 +425,12 @@ fetch observability.js
 fetch ops.js
 fetch retention.js
 fetch selftest.js
+fetch fleet.js
+fetch probe.js
+fetch fleet-health-monitor.js
+fetch fleet-orchestrator.js
+fetch fleet-panel-routes.js
+fetch fleet-autoactions.js
 
 # 语法损坏的发布绝不能替换可用的安装。
 #
@@ -439,7 +445,7 @@ syntax_check() {
   ' "$1"
 }
 
-for js in server.js identity.js token-budget.js verify.js gate-drill.js transport-fingerprint.js proxy.js panel.js panel-settings.js config.js model-groups.js socks-bridge.js warp.js warp-farm.js compat.js stats.js egress-proxy.js audit.js autoheal.js backup.js dashboard-api.js diagnostics.js notify.js observability.js ops.js retention.js selftest.js; do
+for js in server.js identity.js token-budget.js verify.js gate-drill.js transport-fingerprint.js proxy.js panel.js panel-settings.js config.js model-groups.js socks-bridge.js warp.js warp-farm.js compat.js stats.js egress-proxy.js audit.js autoheal.js backup.js dashboard-api.js diagnostics.js notify.js observability.js ops.js retention.js selftest.js fleet.js probe.js fleet-health-monitor.js fleet-orchestrator.js fleet-panel-routes.js fleet-autoactions.js; do
   syntax_check "$STAGE/$js" >/dev/null 2>&1 || die "$js failed a syntax check; the running gateway was left untouched"
 done
 for json in package.json transport-baseline.json; do
@@ -470,7 +476,7 @@ if [ -n "$(port_holder)" ]; then
   die "cannot bind port $PORT"
 fi
 
-for file in package.json server.js identity.js token-budget.js verify.js gate-drill.js transport-fingerprint.js transport-baseline.json tunnel-doctor.sh proxy.js panel.js panel-avatar.png panel-settings.js config.js model-groups.js socks-bridge.js warp.js warp-farm.js compat.js stats.js egress-proxy.js audit.js autoheal.js backup.js dashboard-api.js diagnostics.js notify.js observability.js ops.js retention.js selftest.js THIRD_PARTY_NOTICES.md; do
+for file in package.json server.js identity.js token-budget.js verify.js gate-drill.js transport-fingerprint.js transport-baseline.json tunnel-doctor.sh proxy.js panel.js panel-avatar.png panel-settings.js config.js model-groups.js socks-bridge.js warp.js warp-farm.js compat.js stats.js egress-proxy.js audit.js autoheal.js backup.js dashboard-api.js diagnostics.js notify.js observability.js ops.js retention.js selftest.js fleet.js probe.js fleet-health-monitor.js fleet-orchestrator.js fleet-panel-routes.js fleet-autoactions.js THIRD_PARTY_NOTICES.md; do
   [ -f "$STAGE/$file" ] && mv -f "$STAGE/$file" "$BINDIR/$file"
 done
 if [ -d "$STAGE/warp-farm" ]; then

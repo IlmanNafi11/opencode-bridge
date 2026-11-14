@@ -189,13 +189,17 @@
   - **Files:** `fleet.js`, `notify.js`, `server.js` (opt)
   - **Estimated scope:** S (1–2 files)
 
-- [ ] Task 11: Dokumentasi, changelog, migration note
+- [x] Task 11: Dokumentasi, changelog, migration note
   - **Description:** Update `README.md` & `CHANGELOG.md` dengan fitur baru; catat tanggung jawab `fleet.db` backup; tambahkan `FLEET_DB_PATH` & env lainnya ke contoh `.env`.
   - **Acceptance criteria:**
-    - [ ] Dokumentasi mencakup fitur baru + lokasi db + env.
-    - [ ] `CHANGELOG.md` ada entri baru (opsional).
+    - [x] Dokumentasi mencakup fitur baru + lokasi db + env.
+    - [x] `CHANGELOG.md` ada entri baru (opsional).
+  - **Verifikasi:**
+    - [x] Smoke: gateway v0.1.7 → `/api/fleet/init|register|probe|status|events|apply-pool` sesuai README; idempoten; `proxy.json` terisi.
+    - [x] Smoke: `UPSTREAM_PROXY_POOL` terisi → apply-pool `409 pool_env_locked`.
+    - [x] Celah pengiriman ditutup: `fleet*.js`/`probe.js` kini ada di `package.json files`, `UPDATE_FILES`, dan `install.sh` (fetch/syntax/backup/move); install lokal nyata memasang keenam file.
   - **Dependencies:** Task 9
-  - **Files:** `README.md`, `CHANGELOG.md`, `FLEET-C2-DESIGN.md` (opsional)
+  - **Files:** `README.md`, `CHANGELOG.md`, `package.json`, `install.sh`, `server.js` (UPDATE_FILES)
   - **Estimated scope:** S (1–2 files)
 
 ### Checkpoint: Complete

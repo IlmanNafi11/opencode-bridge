@@ -1,5 +1,40 @@
 # Changelog
 
+## [0.1.7] — 2026-11-13
+
+Fleet C2 egress registry (Armada Cerdas), optional:
+
+- **Fleet registry (SQLite).** `fleet.db` at `<state>/fleet.db`
+  (`FLEET_DB_PATH` override, WAL, mode `0600`) stores `nodes`,
+  `node_health`, `quota_signals`, `node_events` plus 5 indexes.
+  `registerNode()` is idempotent; `initDB()` creates the schema on
+  first use.
+- **Register and probe.** `POST /api/fleet/init` and
+  `POST /api/fleet/register` add nodes (`label`, `node_type`,
+  `connect_kind`, `egress_spec`, `tags`). `POST /api/fleet/probe`
+  probes one node or all reachable ones: `probe.js` reuses
+  `proxy.testProxy` for `direct-proxy` / `ssh-reverse-tunnel` /
+  `wireguard` / `tunnel-cf`, HTTP-GETs `relay-http` nodes, and skips
+  `pending` / `unknown` / `warp`.
+- **Health monitor.** `fleet-health-monitor.js` loops every
+  `FLEET_PROBE_INTERVAL_MS` (default 300000, `unref`ed), writes
+  `node_health`, classifies quota signals (`429`, `403`, `quota`,
+  `free-tier`, `capacity`, `ip-abuse`), and sets per-node cooldowns
+  (`FLEET_COOLDOWN_BASE_MS`, default 120000). Real request failures
+  feed the same `quota_signals` table through the egress-failure hook.
+- **Pool orchestration.** `POST /api/fleet/apply-pool` — `fleet-orchestrator.js`
+  filters registrable nodes (reachable, not cooling, kind not
+  `pending`/`unknown`/`relay-http`/`warp`), merges ready WARP farm lanes
+  (`warp-f<n>`), and publishes via `proxy.setPool()` only — `proxy.js`
+  is untouched. `UPSTREAM_PROXY_POOL` / `UPSTREAM_PROXY_URL` locking the
+  pool makes apply fail with `pool_env_locked` (HTTP 409).
+  `FLEET_POOL_STRATEGY` (round-robin | failover | random) selects the
+  strategy. Auto-actions can notify on cooldown-edge / empty pool and
+  activate a standby node (`FLEET_AUTO_ACTIONS=1`, `FLEET_AUTO_SCALE=1`).
+- **Observability.** `GET /api/fleet/status` (nodes, health, quota counts,
+  pool config, last applied, OK/DEGRADED/CRITICAL summary) and
+  `GET /api/fleet/events` (filter `nodeId` / `action` / `since`).
+
 ## [0.1.6] — 2026-11-11
 
 Operations hardening and panel follow-through:

@@ -117,15 +117,17 @@
   - **Files:** `fleet.js`, `notify.js`, `server.js` (opt)
   - **Scope:** S (1–2 files)
 
-- [ ] Task 11: Dokumentasi & changelog
-  - **Acceptance:** README + CHANGELOG hadir; env contoh; db backup note.
+- [x] Task 11: Dokumentasi & changelog
+  - **Acceptance:** README (fitur, env, endpoint, file, `fleet.db` backup) + CHANGELOG 0.1.7; env contoh ada di tabel env README (repo tidak punya `.env.example`).
+  - **Verify:** smoke endpoint dari README pada gateway v0.1.7; install lokal memasang keenam modul fleet.
   - **Dependencies:** Task 9
-  - **Files:** `README.md`, `CHANGELOG.md`
-  - **Scope:** S (1–2 files)
+  - **Files:** `README.md`, `CHANGELOG.md`, `package.json`, `install.sh`
+  - **Scope:** S
+  - **Catatan:** celah pengiriman ditemukan saat verifikasi — modul fleet tidak ada di `package.json files`, `UPDATE_FILES`, atau `install.sh`; ditutup di task ini.
 
 ### Checkpoint: Complete
-- [ ] Semua fase 1–5 selesai & smoke lulus.
-- [ ] Code review human sebelum penyerahan.
+- [x] Semua fase 1–5 selesai & smoke lulus.
+- [ ] Code review human sebelum penyerahan (di luar wewenang agen).
 
 ---
 

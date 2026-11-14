@@ -66,16 +66,16 @@ step) with a matching `.sha256` file:
 
 | Platform | Archive |
 | --- | --- |
-| Linux x86_64 | `fucking-opencode_v0.1.6_linux_amd64.tar.gz` |
-| Linux arm64 | `fucking-opencode_v0.1.6_linux_arm64.tar.gz` |
-| macOS Intel | `fucking-opencode_v0.1.6_darwin_amd64.tar.gz` |
-| macOS Apple silicon | `fucking-opencode_v0.1.6_darwin_arm64.tar.gz` |
-| Windows x86_64 | `fucking-opencode_v0.1.6_windows_amd64.zip` |
-| Windows arm64 | `fucking-opencode_v0.1.6_windows_arm64.zip` |
+| Linux x86_64 | `fucking-opencode_v0.1.7_linux_amd64.tar.gz` |
+| Linux arm64 | `fucking-opencode_v0.1.7_linux_arm64.tar.gz` |
+| macOS Intel | `fucking-opencode_v0.1.7_darwin_amd64.tar.gz` |
+| macOS Apple silicon | `fucking-opencode_v0.1.7_darwin_arm64.tar.gz` |
+| Windows x86_64 | `fucking-opencode_v0.1.7_windows_amd64.zip` |
+| Windows arm64 | `fucking-opencode_v0.1.7_windows_arm64.zip` |
 
 ```bash
-tar -xzf fucking-opencode_v0.1.6_linux_amd64.tar.gz
-cd fucking-opencode-0.1.6
+tar -xzf fucking-opencode_v0.1.7_linux_amd64.tar.gz
+cd fucking-opencode-0.1.7
 ./fucking-opencode          # or: bun server.js
 ```
 
@@ -123,6 +123,9 @@ in `settings.json`.
   and is never retried.
 - Egress control — direct, single HTTP/HTTPS proxy, egress relay, or a proxy
   pool with per-entry health, cooldown, and persisted state.
+- Fleet C2 registry (optional) — SQLite node registry, reachability probes,
+  quota-signal detection and cooldowns, and pool orchestration through the
+  existing `proxy.setPool()`.
 - Usage metering — local JSONL history, six KPI cards, a 24-bucket stacked
   token chart, cached-token tracking, and per-model totals.
 - Operations panel — overview, health, egress, pool, usage, history, endpoint,
@@ -204,7 +207,7 @@ docker run -d --name fucking-opencode \
 | `PANEL_ALLOWED_HOSTS` | *(empty)* | Extra `Host` names accepted by the panel and admin APIs |
 | `FUCKING_OPENCODE_API_KEYS` | *(empty)* | Comma-separated fallback API keys; every listed key is accepted |
 | `FUCKING_OPENCODE_DEFAULT_MODEL` | *(empty)* | Model used when a chat request omits `model` |
-| `FUCKING_OPENCODE_STATE_DIR` | `~/.fucking-opencode` | Settings, proxy, pool health, usage, history |
+| `FUCKING_OPENCODE_STATE_DIR` | `~/.fucking-opencode` | Settings, proxy, pool health, usage, history, `fleet.db` |
 | `FUCKING_OPENCODE_USAGE_FILE` | `<state>/usage.jsonl` | Override the usage ledger path (absolute or relative to state dir) |
 | `FUCKING_OPENCODE_CONFIG` | `<state>/config.json` | Runtime config file, hot-reloaded on change |
 | `OPENCODE_CACHE_DIR` | `<state>/cache` | Catalog cache (`off` disables disk caching) |
@@ -246,6 +249,12 @@ docker run -d --name fucking-opencode \
 | `NOTIFY_WEBHOOK_URL` | *(unset)* | Discord/Telegram/generic webhook for incident alerts (deduped 5 min, max 10/min) |
 | `NOTIFY_TELEGRAM_CHAT_ID` | *(unset)* | Chat id required when the webhook URL is a Telegram bot endpoint |
 | `FUCKING_OPENCODE_MODEL_GROUP_WEIGHTS` | *(unset)* | JSON alias → model → weight (1..100); overrides `modelGroupWeights` in `config.json` |
+| `FLEET_DB_PATH` | `<state>/fleet.db` | Fleet registry SQLite path; WAL, mode `0600` |
+| `FLEET_PROBE_INTERVAL_MS` | `300000` | Fleet health-monitor loop interval (5 min) |
+| `FLEET_COOLDOWN_BASE_MS` | `120000` | Per-node cooldown after a quota signal (2 min) |
+| `FLEET_POOL_STRATEGY` | `round-robin` | Fleet pool strategy: `round-robin`, `failover`, or `random` |
+| `FLEET_AUTO_ACTIONS` | `0` | `1` enables fleet auto-actions (cooldown and empty-pool notifications) |
+| `FLEET_AUTO_SCALE` | `0` | `1` also lets auto-actions activate a standby node when the pool is empty |
 
 Changing a credential or proxy in the panel applies immediately. Other
 environment changes require a restart.
@@ -303,6 +312,73 @@ runs at most once per `intervalHours` and only while no request is in flight;
 quiet hours and per-incident abuse reactions are honored. Incidents persist in
 `<state>/incidents.json` (mode 0600) and are the only observability data that
 survives a restart.
+
+### Fleet C2 egress registry (optional)
+
+The fleet layer records every egress node in SQLite and can rebuild the proxy
+pool from those records. It is additive: `proxy.js` is untouched and
+`proxy.setPool()` remains the only writer of `proxy.json`.
+
+```bash
+# 1. create the database (idempotent)
+curl -sX POST http://127.0.0.1:20134/api/fleet/init
+
+# 2. register a node that already has a proxy endpoint
+curl -sX POST http://127.0.0.1:20134/api/fleet/register \
+  -H 'Content-Type: application/json' \
+  -d '{"label":"nat-1","node_type":"vps-nat","connect_kind":"ssh-reverse-tunnel",
+       "egress_spec":{"proxyUrl":"socks5://127.0.0.1:20251"}}'
+
+# 3. probe it, then publish the pool
+curl -sX POST http://127.0.0.1:20134/api/fleet/probe \
+  -H 'Content-Type: application/json' -d '{}'
+curl -sX POST http://127.0.0.1:20134/api/fleet/apply-pool \
+  -H 'Content-Type: application/json' -d '{}'
+```
+
+`fleet.db` lives at `<state>/fleet.db` (override `FLEET_DB_PATH`) with WAL and
+mode `0600`. Schema: `nodes`, `node_health`, `quota_signals`, `node_events`, and
+five indexes. `registerNode()` is idempotent by `label`; re-registering a label
+updates it and returns `created: false`. The node id is derived server-side from
+the label (`nat-1`, then `nat-1-2` on collision); it is not supplied by the
+caller.
+
+| `connect_kind` | Probe | Enters the pool |
+| --- | --- | --- |
+| `direct-proxy`, `ssh-reverse-tunnel`, `wireguard`, `tunnel-cf` | via `proxy.testProxy` using `egress_spec.proxyUrl` | yes, when reachable and not cooling |
+| `relay-http` | HTTP `GET` of `egress_spec.probePath` | never — serverless cannot hold a CONNECT tunnel |
+| `pending`, `unknown` | skipped | never |
+| `warp` | skipped — `warp-farm.js` owns lane state | via the farm lanes merged by the orchestrator |
+
+The health monitor probes every reachable node on `FLEET_PROBE_INTERVAL_MS`
+(`unref`ed, so it never keeps the process alive) and classifies upstream
+refusals as `429`, `403`, `quota`, `free-tier`, `capacity`, or `ip-abuse`. A
+signal writes `quota_signals`, sets `node_health.quota_signal`, and pushes
+`cooling_until` out by `FLEET_COOLDOWN_BASE_MS`. Real request failures feed the
+same table through the egress-failure path, so quota observed on live traffic is
+not ignored until the next probe.
+
+`POST /api/fleet/apply-pool` filters nodes to reachable, not cooling, and
+pool-capable kinds, merges ready WARP farm lanes as `warp-f<n>`, and calls
+`proxy.setPool()`. If `UPSTREAM_PROXY_POOL` or `UPSTREAM_PROXY_URL` is set, the
+pool is operator-locked: apply returns `409` with `pool_env_locked` rather than
+overwriting the environment. `FLEET_POOL_STRATEGY` selects `round-robin`
+(default), `failover`, or `random`.
+
+`GET /api/fleet/status` returns nodes, health, quota-signal counts, pool
+configuration, the last apply time, and an `OK` / `DEGRADED` / `CRITICAL`
+summary. `GET /api/fleet/events` filters the audit trail by `nodeId`, `action`,
+and `since`. All fleet endpoints use the panel-session and Host/JSON guard of
+the other admin routes.
+
+Auto-actions are opt-in: `FLEET_AUTO_ACTIONS=1` notifies on a node entering
+cooldown and on an empty pool; `FLEET_AUTO_SCALE=1` additionally re-enables one
+standby node (registered but not reachable, with a usable proxy URL) when the
+pool is empty.
+
+`fleet.db` is not part of `/api/backup` or the self-updater file set: back it up
+by copying the file while the gateway is stopped (WAL checkpointed), and keep it
+with the rest of the state directory.
 
 ### Cloudflare WARP (optional)
 
@@ -411,6 +487,13 @@ no GPL code is linked into `server.js`.
 | `POST /api/notify/test` | — | Send a test notification to one target (`targetId`) or the first enabled target |
 | `GET /api/models/simulate?model=` | — | Preview which model a group alias resolves to, including cooldowns |
 | `POST /api/farm/resize` | — | Resize the WARP farm to `{"size":N}` (1..32) and restart it when running |
+| `POST /api/fleet/init` | — | Create the fleet registry schema; returns `{dbPath, version}` |
+| `POST /api/fleet/register` | — | Register a node by `label` (idempotent) with `node_type`, `connect_kind`, `egress_spec`, `tags` |
+| `POST /api/fleet/probe` | — | Probe one node (`nodeId`) or every reachable node; writes `node_health` |
+| `POST /api/fleet/health-monitor` | — | Run one health round now instead of waiting for the interval |
+| `POST /api/fleet/apply-pool` | — | Publish fleet nodes plus ready farm lanes via `proxy.setPool()`; `409 pool_env_locked` when env owns the pool |
+| `GET /api/fleet/status` | — | Nodes, health, quota-signal counts, pool config, last apply, `OK`/`DEGRADED`/`CRITICAL` |
+| `GET /api/fleet/events` | — | Node audit trail filtered by `nodeId`, `action`, and `since` |
 
 ### Connect anything
 
@@ -652,6 +735,12 @@ The response reports `status`, `version`, `runtime`, `discoveredModels`,
 | `start-fucking-opencode.cmd` | Windows launcher on port `20134` |
 | `Dockerfile` / `docker-compose.yaml` | Container deployment |
 | `test/` | Offline unit, contract, and regression tests |
+| `fleet.js` | Fleet registry: SQLite schema, node CRUD, health and quota rows |
+| `probe.js` | Node reachability probe via `proxy.testProxy` or relay HTTP GET |
+| `fleet-health-monitor.js` | Periodic probe loop, quota-signal classification, cooldowns |
+| `fleet-orchestrator.js` | `applyToPool()`: registry plus ready farm lanes → `proxy.setPool()` |
+| `fleet-panel-routes.js` | `/api/fleet/status` and `/api/fleet/events` payloads |
+| `fleet-autoactions.js` | Optional cooldown/empty-pool notifications and standby activation |
 
 </details>
 
