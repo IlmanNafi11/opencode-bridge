@@ -270,6 +270,35 @@ describe("/api/fleet/apply-pool", () => {
     assert.equal(r.status, 405);
     assert.equal(r.headers.allow, "POST");
   });
+
+  it("rejects non-local Host and cross-site starts with the admin guard", async () => {
+    const badHost = await request(port, "POST", "/api/fleet/apply-pool", {}, { Host: "evil.example" });
+    assert.equal(badHost.status, 403, badHost.raw);
+    assert.match(badHost.body.error, /Host evil\.example tidak diizinkan/);
+
+    const crossSite = await request(port, "POST", "/api/fleet/apply-pool", {}, { "Sec-Fetch-Site": "cross-site" });
+    assert.equal(crossSite.status, 403, crossSite.raw);
+    assert.match(crossSite.body.error, /lintas-situs/);
+  });
+
+  it("maps an env-locked pool to 409 pool_env_locked without touching proxy.json", async () => {
+    const proxy = require("../proxy");
+    const before = proxy.describe().pool;
+    process.env.UPSTREAM_PROXY_POOL = "http://127.0.0.1:9";
+    try {
+      const r = await request(port, "POST", "/api/fleet/apply-pool", {});
+      assert.equal(r.status, 409, JSON.stringify(r.body));
+      assert.equal(r.body.ok, false);
+      assert.equal(r.body.error.code, "pool_env_locked");
+      assert.equal(r.body.error.type, "locked");
+    } finally {
+      delete process.env.UPSTREAM_PROXY_POOL;
+    }
+    // 运维意图优先：锁定时 pool 保持原样。
+    const after = proxy.describe().pool;
+    assert.equal(after.source, before.source);
+    assert.deepEqual(after.entries.map((e) => e.url), before.entries.map((e) => e.url));
+  });
 });
 
 describe("/api/fleet/status & /api/fleet/events", () => {

@@ -80,16 +80,16 @@
 
 - [x] Task 8: Endpoint `/api/fleet/apply-pool`
   - **Acceptance:** POST → `applyToPool()`; admin-only; output `{ok, entryCount, farmCount, strategy}`; error format konsisten.
-  - **Verify:** curl.
+  - **Verify:** curl POST → pool tercermin; `UPSTREAM_PROXY_POOL` → `409 pool_env_locked`; Host non-lokal/cross-site → 403; GET → 405; non-JSON → 415; regresi route-level di `test/fleet-e2e.test.js` (mutation-checked).
   - **Dependencies:** Task 7
   - **Files:** `server.js`, `fleet-orchestrator.js`
   - **Scope:** S (1–2 files)
 
 ### Checkpoint: Pool
-- [ ] Pool diperbarui.
-- [ ] Env terkunci → reject.
-- [ ] Farm digabung bila aktif.
-- [ ] Review manusia sebelum Fase 5.
+- [x] Pool diperbarui.
+- [x] Env terkunci → reject.
+- [x] Farm digabung bila aktif.
+- [x] Review manusia sebelum Fase 5 (route guard + 409 dipetakan dan diuji di Task 8).
 
 ---
 

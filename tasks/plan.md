@@ -141,11 +141,13 @@
 
 - [x] Task 8: Endpoint `/api/fleet/apply-pool`
   - **Acceptance criteria:**
-    - [ ] Endpoint jalan dari admin.
-    - [ ] Hasil mencerminkan pool baru.
-    - [ ] Error dari `applyToPool()` ditampilkan dengan format error yang konsisten.
+    - [x] Endpoint jalan dari admin.
+    - [x] Hasil mencerminkan pool baru.
+    - [x] Error dari `applyToPool()` ditampilkan dengan format error yang konsisten.
   - **Verifikasi:**
-    - [ ] Run gateway, curl `/api/fleet/apply-pool` → output sesuai.
+    - [x] Run gateway, curl `/api/fleet/apply-pool` → output sesuai.
+    - [x] Smoke langsung: node terdaftar → `proxy.json` berisi entry; `UPSTREAM_PROXY_POOL` terisi → `409 pool_env_locked` tanpa menyentuh `proxy.json`; Host non-lokal & `Sec-Fetch-Site: cross-site` → 403; GET → 405; `text/plain` → 415.
+    - [x] Regresi route-level: `test/fleet-e2e.test.js` menguji guard admin + pemetaan 409 (mutation-checked: tes gagal saat guard/pemetaan dihapus).
   - **Dependencies:** Task 7
   - **Files:** `server.js`, `fleet-orchestrator.js`
   - **Estimated scope:** S (1–2 files)
