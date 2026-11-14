@@ -206,3 +206,31 @@ test(
     }
   }
 );
+
+test(
+  "节拍 tidak menghidupkan node yang baru saja gagal probe (FLEET_AUTO_SCALE=1)",
+  { skip: 需要Bun },
+  async () => {
+    设置目录();
+    开启();
+    开启扩容();
+    try {
+      fleet.initDB();
+      // probe 失败把 reachable 降为 false —— 与"待命节点"同形，但原因不同。
+      const mati = 注册Node({ label: "mati", reachable: false });
+      fleet.writeHealth({ nodeId: mati.nodeId, ok: false, error: "relay 返回 503" });
+      const { notify, sent } = 记录通知();
+      let applyCalls = 0;
+      const applyPool = async () => { applyCalls += 1; return { ok: true, entryCount: 1 }; };
+
+      const r = await autoactions.节拍({ notify, applyPool });
+
+      assert.equal(r.scaled, false, `node mati tidak boleh diskalakan: ${JSON.stringify(r)}`);
+      assert.equal(applyCalls, 0);
+      assert.equal(fleet.getNode(mati.nodeId).reachable, false);
+      assert.ok(sent.some((m) => /pool-empty/.test(m.key)), "pool tetap kosong → notifikasi pool-empty");
+    } finally {
+      恢复目录();
+    }
+  }
+);

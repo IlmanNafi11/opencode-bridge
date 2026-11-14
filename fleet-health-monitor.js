@@ -33,7 +33,12 @@ function 判断信号(status, errorText) {
   return null;
 }
 
-/** 一轮探测所有 reachable & 非 skip 的 node；探到 sinyal kuota时 set cooldown。 */
+/**
+ * 一轮探测所有可探 node；探到 sinyal kuota 时 set cooldown。
+ *
+ * 只按接法筛（pending/unknown 未就绪，warp 归 farm）：`reachable` 是探测的
+ * *结果*，不是输入。按它筛会让一次失败永久退出探测，节点再也没机会恢复。
+ */
 async function runOnce() {
   try {
     const ready = fleet.initDB();
@@ -42,9 +47,7 @@ async function runOnce() {
     return { ok: false, error: { message: `initDB gagal: ${err.message}`, type: "sqlite", code: "init_failed" } };
   }
 
-  const nodes = fleet
-    .getNodes()
-    .filter((n) => n.reachable !== false && !间隔类型.has(String(n.connect_kind || "")));
+  const nodes = fleet.getNodes().filter((n) => !间隔类型.has(String(n.connect_kind || "")));
   const results = [];
   for (const node of nodes) {
     const verdict = await 探针.probeNode(node);

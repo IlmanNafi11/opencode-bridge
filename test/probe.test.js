@@ -4,7 +4,7 @@ const { test } = require("node:test");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
-
+const http = require("node:http");
 const fleet = require("../fleet");
 const probe = require("../probe");
 
@@ -107,6 +107,72 @@ test(
       assert.equal(rows[0].ok, false);
       assert.ok(rows[0].error);
     } finally {
+      恢复目录();
+    }
+  }
+);
+
+test(
+  "probeNode relay gagal → registry reachable=false supaya node mati tidak masuk pool",
+  { skip: 需要Bun },
+  async () => {
+    设置目录();
+    const relay = http.createServer((req, res) => {
+      res.writeHead(503, { "Content-Type": "application/json" });
+      res.end('{"error":"unavailable"}');
+    });
+    await new Promise((resolve) => relay.listen(0, "127.0.0.1", resolve));
+    try {
+      fleet.initDB();
+      const reg = fleet.registerNode({
+        label: "relay-mati",
+        node_type: "runner-free",
+        connect_kind: "relay-http",
+        egress_spec: { proxyUrl: `http://127.0.0.1:${relay.address().port}`, probePath: "/" },
+      });
+      assert.equal(reg.ok, true, JSON.stringify(reg));
+      assert.equal(fleet.getNode(reg.nodeId).reachable, true, "prasyarat: node terdaftar reachable");
+
+      const r = await probe.probeNode(fleet.getNode(reg.nodeId));
+      assert.equal(r.ok, false);
+      assert.equal(fleet.getNode(reg.nodeId).reachable, false);
+    } finally {
+      relay.close();
+      恢复目录();
+    }
+  }
+);
+
+test(
+  "probeNode sukses → registry reachable=true dan last_heartbeat_at terisi",
+  { skip: 需要Bun },
+  async () => {
+    设置目录();
+    const relay = http.createServer((req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end('{"ok":true}');
+    });
+    await new Promise((resolve) => relay.listen(0, "127.0.0.1", resolve));
+    try {
+      fleet.initDB();
+      const reg = fleet.registerNode({
+        label: "relay-hidup",
+        node_type: "runner-free",
+        connect_kind: "relay-http",
+        egress_spec: { proxyUrl: `http://127.0.0.1:${relay.address().port}`, probePath: "/" },
+        reachable: false,
+      });
+      assert.equal(reg.ok, true, JSON.stringify(reg));
+      assert.equal(fleet.getNode(reg.nodeId).last_heartbeat_at, null, "prasyarat: belum pernah heartbeat");
+
+      const r = await probe.probeNode(fleet.getNode(reg.nodeId));
+      assert.equal(r.ok, true, JSON.stringify(r));
+      const after = fleet.getNode(reg.nodeId);
+      assert.equal(after.reachable, true);
+      assert.ok(after.last_heartbeat_at, "probe sukses harus menstempel last_heartbeat_at");
+      assert.ok(Number.isFinite(Date.parse(after.last_heartbeat_at)), `heartbeat bukan waktu valid: ${after.last_heartbeat_at}`);
+    } finally {
+      relay.close();
       恢复目录();
     }
   }

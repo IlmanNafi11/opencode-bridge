@@ -3180,8 +3180,8 @@ async function 处理FleetAPI(req, res, pathname) {
   if (pathname === "/api/fleet/probe") {
     const ready = fleet.initDB();
     if (!ready.ok) return send(503, ready);
-    // body {nodeId?}：缺省探测所有 reachable=true 的节点；probeNode 自己再
-    // 跳过 pending/unknown/warp，所以这里只管按可达性初筛。
+    // body {nodeId?}：缺省探测所有可探节点。`reachable` 是探测结果而非输入，
+    // 按它筛会让失败节点永远不再被探到；只跳过 probeNode 自己也不会做的接法。
     if (payload.nodeId) {
       const node = fleet.getNode(payload.nodeId);
       if (!node) {
@@ -3190,10 +3190,10 @@ async function 处理FleetAPI(req, res, pathname) {
       const verdict = await 探针.probeNode(node);
       return send(200, { ok: true, results: [{ nodeId: node.id, ...verdict }] });
     }
-    // "probe semua" hanya menjaring node yang probeNode akan kerjakan: pending/
-    // unknown belum siap, warp diurus farm. relay-http tetap ikut (probeNode GET).
+    // "probe semua" 只按接法筛：pending/unknown 未就绪，warp 归 farm。
+    // relay-http 照旧参与（probeNode 走 GET）。已失败节点必须继续探，否则永不恢复。
     const 跳过 = new Set(["pending", "unknown", "warp"]);
-    const nodes = fleet.getNodes().filter((n) => n.reachable === true && !跳过.has(n.connect_kind));
+    const nodes = fleet.getNodes().filter((n) => !跳过.has(n.connect_kind));
     const results = await Promise.all(
       nodes.map(async (n) => ({ nodeId: n.id, ...(await 探针.probeNode(n)) }))
     );

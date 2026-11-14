@@ -105,6 +105,43 @@ test(
   }
 );
 
+test(
+  "runOnce tetap mem-probe node yang sempat tidak reachable supaya bisa pulih",
+  { skip: 需要Bun },
+  async () => {
+    设置目录();
+    let status = 503;
+    const relay = http.createServer((req, res) => {
+      res.writeHead(status, { "Content-Type": "application/json" });
+      res.end('{"error":"x"}');
+    });
+    await new Promise((resolve) => relay.listen(0, "127.0.0.1", resolve));
+    try {
+      fleet.initDB();
+      const reg = fleet.registerNode({
+        label: "relay-pulih",
+        node_type: "runner-free",
+        connect_kind: "relay-http",
+        egress_spec: { proxyUrl: `http://127.0.0.1:${relay.address().port}`, probePath: "/" },
+      });
+
+      await monitor.runOnce();
+      assert.equal(fleet.getNode(reg.nodeId).reachable, false, "gagal probe harus menurunkan reachable");
+
+      status = 200;
+      const r = await monitor.runOnce();
+      assert.equal(r.ok, true, JSON.stringify(r));
+      assert.ok(r.results.some((x) => x.nodeId === reg.nodeId), "node tidak reachable tetap diprobe ulang");
+      const after = fleet.getNode(reg.nodeId);
+      assert.equal(after.reachable, true, "probe sukses harus memulihkan reachable");
+      assert.ok(after.last_heartbeat_at, "pemulihan harus menstempel heartbeat");
+    } finally {
+      relay.close();
+      恢复目录();
+    }
+  }
+);
+
 test("start/stop idempoten; start(0) tak membuat timer", { skip: 需要Bun }, () => {
   设置目录();
   try {

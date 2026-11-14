@@ -76,7 +76,7 @@ async function 探测代理(node, spec, timeoutMs) {
     httpStatus: verdict.apiStatus != null ? Number(verdict.apiStatus) : null,
     error: verdict.error || null,
   };
-  fleet.writeHealth({ nodeId: node.id, ...result });
+  记录探测(node, result);
   return result;
 }
 
@@ -94,7 +94,7 @@ async function 探测Relay(node, spec, timeoutMs) {
     res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
   } catch (err) {
     const result = { ok: false, exitIp: null, latencyMs: Date.now() - started, httpStatus: null, error: `relay tidak reachable: ${err.message}` };
-    fleet.writeHealth({ nodeId: node.id, ...result });
+    记录探测(node, result);
     return result;
   }
   const latencyMs = Date.now() - started;
@@ -105,8 +105,20 @@ async function 探测Relay(node, spec, timeoutMs) {
     httpStatus: res.status,
     error: res.ok ? null : `relay 返回 ${res.status}`,
   };
-  fleet.writeHealth({ nodeId: node.id, ...result });
+  记录探测(node, result);
   return result;
+}
+
+/**
+ * 一次探测的完整落库：node_health 记健康，nodes 记可达性 —— 后者是池编排
+ * 的唯一依据，probe 是唯一知道结论的地方。探测成功同时盖 last_heartbeat_at
+ * （节点从不 push，心跳就是"最近一次被探到"）；失败把 reachable 降为 false，
+ * 让 apply-pool 立刻跳过死节点，不必等冷却或人工改 registry。
+ */
+function 记录探测(node, result) {
+  fleet.writeHealth({ nodeId: node.id, ...result });
+  const patch = result.ok ? { reachable: true, last_heartbeat_at: new Date().toISOString() } : { reachable: false };
+  fleet.updateNode(node.id, patch);
 }
 
 module.exports = { probeNode };

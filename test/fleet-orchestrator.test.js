@@ -8,6 +8,7 @@ const path = require("node:path");
 const fleet = require("../fleet");
 const proxy = require("../proxy");
 const orchestrator = require("../fleet-orchestrator");
+const probe = require("../probe");
 
 const isBun = typeof process !== "undefined" && Boolean(process.versions && process.versions.bun);
 // applyToPool baca/write fleet.db (bun:sqlite) dan panggil proxy.setPool; di Node
@@ -181,6 +182,37 @@ test(
       assert.equal(r.farmCount, 0);
       assert.deepEqual(r.nodeIds, []);
       assert.equal(r.skipped.length, 1);
+      assert.equal(proxy.describe().pool.size, 0);
+    } finally {
+      恢复目录();
+    }
+  }
+);
+
+test(
+  "applyToPool tidak menerbitkan node yang probe terakhirnya gagal",
+  { skip: 需要Bun },
+  async () => {
+    设置目录();
+    try {
+      fleet.initDB();
+      const reg = fleet.registerNode({
+        label: "mati-1",
+        node_type: "vps-nat",
+        connect_kind: "ssh-reverse-tunnel",
+        egress_spec: { proxyUrl: "http://127.0.0.1:1" },
+      });
+      assert.equal(reg.ok, true, JSON.stringify(reg));
+
+      // Probe nyata ke port mati: registry harus turun ke reachable=false.
+      const verdict = await probe.probeNode(fleet.getNode(reg.nodeId), { timeoutMs: 2000 });
+      assert.equal(verdict.ok, false);
+      assert.equal(fleet.getNode(reg.nodeId).reachable, false);
+
+      const r = orchestrator.applyToPool({ farmStatus: { lanes: [] } });
+      assert.equal(r.ok, true, JSON.stringify(r));
+      assert.equal(r.entryCount, 0, `node mati tidak boleh masuk pool: ${JSON.stringify(r.nodeIds)}`);
+      assert.deepEqual(r.skipped.map((s) => s.reason), ["unreachable"]);
       assert.equal(proxy.describe().pool.size, 0);
     } finally {
       恢复目录();

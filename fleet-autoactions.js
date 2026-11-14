@@ -99,9 +99,12 @@ async function 节拍(ctx = {}) {
   let scaled = false;
   if (eligible.length === 0) {
     if (扩容启用()) {
-      // 备用：reachable=false 但接法就绪、有 proxyUrl 的节点。
+      // 备用：reachable=false 但接法就绪、有 proxyUrl 的节点。带失败健康行的
+      // 不算备用 —— 那是 probe 判死的节点，重新入池只会把死出口推给请求。
       const standby = nodes.find((n) => {
         if (n.reachable !== false) return false;
+        const health = healths.get(n.id);
+        if (health && health.ok === false) return false;
         const spec = n.egress_spec && typeof n.egress_spec === "object" ? n.egress_spec : {};
         return !排除接法.has(String(n.connect_kind || "pending")) && Boolean(String(spec.proxyUrl || "").trim());
       });
