@@ -63,8 +63,8 @@
   - **Scope:** M (3–5 files)
 
 ### Checkpoint: Health
-- [ ] Monitor berjalan.
-- [ ] Sinyal kuota + cooldown terdeteksi.
+- [x] Monitor berjalan.
+- [x] Sinyal kuota + cooldown terdeteksi.
 - [ ] Review manusia sebelum Fase 4.
 
 ---
