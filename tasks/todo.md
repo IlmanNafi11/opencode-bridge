@@ -48,9 +48,7 @@
 
 ---
 
-## Phase 3: Health monitoring
-
-- [ ] Task 5: Loop health monitor `fleet-health-monitor.js`
+- [x] Task 5: Loop health monitor `fleet-health-monitor.js`
   - **Acceptance:** `start(intervalMs)`/`stop()`; loop probe; deteksi sinyal kuota; `cooling_until` + `block_based_on_quota`; `unref` interval; `(onRequestQuotaSignal)`.
   - **Verify:** smoke `/api/fleet/health-monitor`; node 429 → cooldown tercatat.
   - **Files:** `fleet-health-monitor.js` (baru), `fleet.js`, `server.js`

@@ -125,6 +125,13 @@ const PROBE_FALLBACK = {
   probeNode: async () => ({ ok: false, error: { message: "probe.js 未安装", type: "unavailable", code: "probe_unavailable" } }),
 };
 const 探针 = 加载本地模块("probe", PROBE_FALLBACK);
+// 健康循环：setInterval 定时探测 + kuota detection；缺失时接口如实返回不可用。
+const HEALTH_MONITOR_FALLBACK = {
+  start: () => ({ ok: false, error: { message: "fleet-health-monitor.js 未安装", type: "unavailable", code: "monitor_unavailable" } }),
+  stop: () => ({ ok: true }),
+  runOnce: async () => ({ ok: false, error: { message: "fleet-health-monitor.js 未安装", type: "unavailable", code: "monitor_unavailable" } }),
+};
+const fleetMonitor = 加载本地模块("fleet-health-monitor", HEALTH_MONITOR_FALLBACK);
 
 const 观测 = require("./observability");
 const 通知 = require("./notify");
@@ -3121,7 +3128,14 @@ async function 处理FleetAPI(req, res, pathname) {
     );
     return send(200, { ok: true, results });
   }
-  return send(404, { ok: false, error: { message: "Endpoint fleet tidak dikenal.", type: "not_found", code: "not_found" } });
+  if (pathname === "/api/fleet/health-monitor") {
+    const ready = fleet.initDB();
+    if (!ready.ok) return send(503, ready);
+    const result = await fleetMonitor.runOnce();
+    return send(result.ok ? 200 : 503, result);
+  }
+
+   return send(404, { ok: false, error: { message: "Endpoint fleet tidak dikenal.", type: "not_found", code: "not_found" } });
 }
 
 /**
@@ -3739,7 +3753,7 @@ async function 处理请求主体(req, res) {
     return;
   }
 
-  if (pathname === "/api/fleet/init" || pathname === "/api/fleet/register" || pathname === "/api/fleet/probe") {
+  if (pathname === "/api/fleet/init" || pathname === "/api/fleet/register" || pathname === "/api/fleet/probe" || pathname === "/api/fleet/health-monitor") {
     const denied = adminRequestError(req);
     if (denied) {
       res.writeHead(403, { "Content-Type": "application/json", "Cache-Control": "no-store" });
@@ -6025,6 +6039,14 @@ if (require.main === module) {
       备份.节拍();
     } catch {}
   }, 60000).unref();
+  // Fleet health monitor：探测 semua node siap tiap interval (default 5 menit),
+  // deteksi sinyal kuota. Loop unref, gateway tidak pernah diblokir.
+  try {
+    const started = fleetMonitor.start();
+    if (started && started.ok) {
+      console.log(`[fucking-opencode] fleet health monitor aktif tiap ${Math.round((started.intervalMs || 0) / 1000)}s`);
+    }
+  } catch {}
 }
 
 module.exports = {

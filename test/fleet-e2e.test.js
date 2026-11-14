@@ -189,3 +189,38 @@ describe("/api/fleet/probe", () => {
     assert.equal(r.headers.allow, "POST");
   });
 });
+
+describe("/api/fleet/health-monitor", () => {
+  let port;
+  let server;
+
+  before(async () => {
+    await new Promise((resolve) => {
+      server = srv.server.listen(0, "127.0.0.1", () => {
+        port = server.address().port;
+        resolve();
+      });
+    });
+  });
+
+  after(async () => {
+    if (typeof fleet.close === "function") fleet.close();
+    await new Promise((resolve) => server.close(resolve));
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it("triggers one health round and reports scanned count", async () => {
+    const r = await request(port, "POST", "/api/fleet/health-monitor", {});
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(r.body.ok, true);
+    assert.equal(typeof r.body.scanned, "number");
+    assert.ok(Array.isArray(r.body.results));
+    assert.ok(r.body.lastRunAt);
+  });
+
+  it("is locked to POST", async () => {
+    const r = await request(port, "GET", "/api/fleet/health-monitor");
+    assert.equal(r.status, 405);
+    assert.equal(r.headers.allow, "POST");
+  });
+});
