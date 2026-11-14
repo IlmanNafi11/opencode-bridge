@@ -5489,17 +5489,29 @@ async function 处理请求主体(req, res) {
   res.end(JSON.stringify({ error: { message: "Not found", type: "invalid_request_error" } }));
 }
 
+/**
+ * 请求实际落地的监听端口。`req.socket.localPort` 是内核给出的真实端口，
+ * 比模块加载时读到的 `PORT` 更可靠：同进程内换端口 listen（测试、多实例）
+ * 时环境变量不会跟着变。取不到时退回 `PORT`。
+ */
+function 本地端口(req) {
+  const port = Number(req?.socket?.localPort);
+  return Number.isInteger(port) && port > 0 ? port : PORT;
+}
+
 /** 自call 桥自己的 /v1/chat/completions：把已翻译的 OpenAI 体发回本桥，
  *  收集响应（JSON 或 SSE 文本），返回 { status, contentType, text, headers }。
- *  用 http.request 走真实端口，这样网关重试、身份、会话亲和全部一致。 */
-function 桥内自调用(oaiBody, reqId) {
+ *  用 http.request 走真实端口，这样网关重试、身份、会话亲和全部一致。
+ *
+ *  端口由调用方传 `本地端口(req)`；默认 `PORT` 只覆盖没有请求上下文的调用。 */
+function 桥内自调用(oaiBody, reqId, 端口 = PORT) {
   const http = require("http");
   return new Promise((resolve, reject) => {
     const payload = JSON.stringify(oaiBody);
     const req = http.request(
       {
         host: "127.0.0.1",
-        port: PORT,
+        port: 端口,
         method: "POST",
         path: "/v1/chat/completions",
         headers: {
@@ -5574,7 +5586,8 @@ async function 处理旧式完成(req, res) {
       原始.map((prompt, index) =>
         桥内自调用(
           { model: body.model, messages: [{ role: "user", content: prompt }], ...参数, stream: false },
-          统计 ? `${统计.request_id}-${index}` : `completions-${index}`
+          统计 ? `${统计.request_id}-${index}` : `completions-${index}`,
+          本地端口(req)
         )
       )
     );
@@ -5674,7 +5687,7 @@ async function 处理Anthropic消息(req, res) {
   }
 
   try {
-    const resp = await 桥内自调用(oai, 统计?.request_id || "anthropic");
+    const resp = await 桥内自调用(oai, 统计?.request_id || "anthropic", 本地端口(req));
     // 上游错误按 Anthropic 形状透传。
     if (resp.status !== 200) {
       let errMsg = "上游错误";
@@ -5784,7 +5797,7 @@ async function 处理Responses请求(req, res) {
   }
 
   try {
-    const resp = await 桥内自调用(oai, 统计?.request_id || "responses");
+    const resp = await 桥内自调用(oai, 统计?.request_id || "responses", 本地端口(req));
     if (resp.status !== 200) {
       let errMsg = "上游错误";
       try {

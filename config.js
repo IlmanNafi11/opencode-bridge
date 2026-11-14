@@ -35,6 +35,7 @@ const 数值范围 = {
 
 let 缓存 = { 键: "", 值: { ...默认值 }, error: "", 修改时间: 0 };
 let 统计时间 = 0;
+let 节流路径 = "";
 const 缓存毫秒 = 1000;
 
 function 状态目录() {
@@ -180,9 +181,13 @@ function 读文件() {
   try {
     stat = fs.statSync(file);
   } catch {
-    return { 值: { ...默认值 }, error: "" };
+    // 文件不存在 = 空配置。缓存也要清掉，否则节流窗口里会继续返回
+    // 上一个配置文件（可能是别的目录）的值。
+    缓存 = { 键: `${file}:missing`, 值: { ...默认值 }, error: "", 修改时间: 0 };
+    return { 值: 缓存.值, error: 缓存.error };
   }
-  const 键 = `${stat.mtimeMs}:${stat.size}`;
+  // 缓存键含文件路径：路径变了就是另一个配置文件，绝不能沿用上一个的值。
+  const 键 = `${file}:${stat.mtimeMs}:${stat.size}`;
   if (键 === 缓存.键) return { 值: 缓存.值, error: 缓存.error };
   let text;
   try {
@@ -204,9 +209,12 @@ function 读文件() {
 }
 
 function 当前文件配置() {
+  const file = 配置文件路径();
   const now = Date.now();
-  if (now - 统计时间 < 缓存毫秒) return { 值: 缓存.值, error: 缓存.error };
+  // 节流窗口同样按路径计：换了配置文件就立刻读新文件，不等窗口过期。
+  if (file === 节流路径 && now - 统计时间 < 缓存毫秒) return { 值: 缓存.值, error: 缓存.error };
   统计时间 = now;
+  节流路径 = file;
   return 读文件();
 }
 
@@ -289,6 +297,7 @@ function 快照() {
 
 function __reload() {
   统计时间 = 0;
+  节流路径 = "";
   缓存 = { 键: "", 值: { ...默认值 }, error: "", 修改时间: 0 };
   return 快照();
 }

@@ -72,6 +72,21 @@ function 文件名(at = new Date()) {
   return "backup-" + at.toISOString().replace(/[:.]/g, "-") + ".json";
 }
 
+/**
+ * 取一个目录内未被占用的快照名。ISO 时间戳只有毫秒精度，同一毫秒内连续
+ * 创建会撞名（rename 覆盖前一个快照 → 快照数量少于预期）。撞名时追加
+ * `-<n>` 序号，仍满足 list() 的 `backup-*.json` 匹配。
+ */
+function 唯一文件名(dir, at = new Date()) {
+  const base = 文件名(at);
+  let name = base;
+  for (let n = 1; fs.existsSync(path.join(dir, name)); n += 1) {
+    name = base.replace(/\.json$/, `-${n}.json`);
+    if (n > 9999) break;
+  }
+  return name;
+}
+
 function 读取文件(name) {
   if (!白名单.includes(name)) return null;
   const file = path.join(状态目录(), name);
@@ -97,7 +112,7 @@ function 创建() {
   }
   const snapshot = { version: 1, at: new Date().toISOString(), files };
   const dir = 备份目录();
-  const name = 文件名();
+  const name = 唯一文件名(dir);
   const file = path.join(dir, name);
   const 临时 = `${file}.tmp.${process.pid}`;
   try {

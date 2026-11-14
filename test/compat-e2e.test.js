@@ -17,6 +17,8 @@ const http = require("node:http");
 
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ofb-compat-e2e-"));
 process.env.FUCKING_OPENCODE_STATE_DIR = tmpDir;
+// module-level PORT stays different from the real listener so self-calls must use
+// req.socket.localPort (not the configured PORT fallback) to reach this server.
 process.env.PORT = "20313";
 process.env.HOST = "127.0.0.1";
 delete process.env.FUCKING_OPENCODE_API_KEYS;
@@ -27,15 +29,15 @@ process.env.OPENCODE_OFFLINE = "1";
 const srv = require("../server");
 const identity = require("../identity");
 
-const PORT = Number(process.env.PORT);
-
-function request(method, urlPath, body, headers = {}) {
+const MODULE_PORT = Number(process.env.PORT);
+let LISTEN_PORT = 0;
+function request(method, urlPath, body, headers = {}, port = LISTEN_PORT) {
   return new Promise((resolve, reject) => {
     const payload = body === undefined ? null : typeof body === "string" ? body : JSON.stringify(body);
     const req = http.request(
       {
         host: "127.0.0.1",
-        port: PORT,
+        port,
         path: urlPath,
         method,
         headers: {
@@ -63,7 +65,7 @@ function request(method, urlPath, body, headers = {}) {
 
 describe("兼容路由端到端", () => {
   let originalFetch;
-
+  let server;
   before(async () => {
     fs.mkdirSync(tmpDir, { recursive: true });
     originalFetch = global.fetch;
@@ -98,20 +100,23 @@ describe("兼容路由端到端", () => {
       models: { "test-free": { cost: { input: 0, output: 0 } } },
     });
     srv.__resetProtocolLanes();
-    await new Promise((resolve) => {
-      // 复用桥自己的 listen 入口：模块导出的是处理器；这里直接起。
+    await new Promise((resolve, reject) => {
+      // 监听端口与模块 PORT 不同：兼容路由的桥内自调用必须使用请求实际端口。
       const handler = srv.__getHandler ? srv.__getHandler() : null;
-      if (handler) {
-        require("node:http").createServer(handler).listen(PORT, "127.0.0.1", resolve);
-      } else {
-        // 兜底：用导出模块的内部 server 不可达时，直接监听 处理请求。
+      if (!handler) return reject(new Error("server handler unavailable"));
+      server = require("node:http").createServer(handler);
+      server.on("error", reject);
+      server.listen(LISTEN_PORT, "127.0.0.1", () => {
+        const addr = server.address();
+        LISTEN_PORT = addr && typeof addr === "object" ? addr.port : LISTEN_PORT;
         resolve();
-      }
+      });
     });
   });
 
   after(async () => {
     global.fetch = originalFetch;
+    if (server) await new Promise((resolve) => server.close(resolve));
     try {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     } catch {}
@@ -200,6 +205,7 @@ describe("兼容路由端到端", () => {
   });
 
   it("上游 4xx 经兼容路由按 Anthropic 形状透传", async () => {
+    const prevFetch = global.fetch;
     global.fetch = async () => ({ ok: false, status: 404, headers: new Headers(), body: null, text: "Not Found" });
     try {
       const r = await request("POST", "/v1/messages", {
@@ -211,7 +217,33 @@ describe("兼容路由端到端", () => {
       assert.equal(r.body.type, "error");
       assert.ok(r.body.error);
     } finally {
-      // 恢复 mock（后续测试如需）。
+      global.fetch = prevFetch;
     }
+  });
+
+  it("监听端口与 PORT 不同时，messages/responses/completions 仍可桥内自调用", async () => {
+    assert.notEqual(LISTEN_PORT, MODULE_PORT);
+    const m = await request("POST", "/v1/messages", {
+      model: "test-free",
+      max_tokens: 10,
+      messages: [{ role: "user", content: "hi" }],
+    });
+    assert.equal(m.status, 200);
+    assert.equal(m.body.type, "message");
+    const r = await request("POST", "/v1/responses", {
+      model: "test-free",
+      input: "hello",
+    });
+    assert.equal(r.status, 200);
+    assert.equal(r.body.object, "response");
+    const c = await request("POST", "/v1/completions", {
+      model: "test-free",
+      prompt: "hello",
+      max_tokens: 10,
+    });
+    assert.equal(c.status, 200);
+    assert.equal(c.body.object, "text_completion");
+    assert.ok(Array.isArray(c.body.choices));
+    assert.match(String(c.body.choices[0]?.text || ""), /你好/);
   });
 });

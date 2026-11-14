@@ -144,6 +144,16 @@ describe("运行时配置", () => {
     assert.match(snap.error, /JSON/);
   });
 
+  it("删除已读取的配置文件后回退到默认值且不报错", () => {
+    写配置({ defaultModel: "temp-model" });
+    assert.equal(config.__reload().values.defaultModel, "temp-model");
+    fs.rmSync(configFile, { force: true });
+    config.__reload();
+    const snap = config.快照();
+    assert.equal(config.取("defaultModel"), "");
+    assert.equal(snap.error, "");
+  });
+
   it("通过 /api/config 暴露生效值与来源", async () => {
     写配置({ defaultModel: "route-model" });
     child = Bun.spawn([process.execPath, "server.js"], {
@@ -195,5 +205,33 @@ describe("运行时配置", () => {
     assert.equal(bad.ok, false);
     assert.match(bad.error, /upstreamTimeoutMs/);
     assert.equal(JSON.parse(fs.readFileSync(configFile, "utf8")).defaultModel, "new-model");
+  });
+
+  it("配置文件路径改变后不沿用上一个路径的缓存值", () => {
+    const otherDir = fs.mkdtempSync(path.join(os.tmpdir(), "ofb-config-other-"));
+    const otherFile = path.join(otherDir, "config.json");
+    try {
+      // 两个值等长：仅切换路径、mtime/size 完全一致时也必须读到新值。
+      写配置({ defaultModel: "path-a-model" });
+      config.__reload();
+      assert.equal(config.取("defaultModel"), "path-a-model");
+
+      // 换到另一个配置文件：mtime/size 可能与上一个相同，缓存不能跨路径复用。
+      fs.writeFileSync(otherFile, JSON.stringify({ defaultModel: "path-b-model" }));
+      const originalMtime = fs.statSync(configFile).mtime;
+      fs.utimesSync(otherFile, originalMtime, originalMtime);
+      process.env.FUCKING_OPENCODE_CONFIG = otherFile;
+      assert.equal(fs.statSync(otherFile).size, fs.statSync(configFile).size);
+      assert.equal(fs.statSync(otherFile).mtimeMs, fs.statSync(configFile).mtimeMs);
+      try {
+        assert.equal(config.取("defaultModel"), "path-b-model");
+      } finally {
+        process.env.FUCKING_OPENCODE_CONFIG = configFile;
+        config.__reload();
+      }
+    } finally {
+      fs.rmSync(otherDir, { recursive: true, force: true });
+      config.__reload();
+    }
   });
 });

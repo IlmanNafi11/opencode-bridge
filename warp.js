@@ -64,16 +64,18 @@ function 解析状态(文本) {
 }
 
 function 状态() {
+  const enabled = 启用();
   const 探测结果 = 探测();
   if (!探测结果.available) {
-    return { enabled: 启用(), available: false, error: 探测结果.error, command: null, version: null };
+    return { enabled, available: false, error: 探测结果.error, command: null, version: null };
   }
   const 结果 = 调用(探测结果.command, ["status"], 8000);
   const 解析 = 解析状态(`${结果.stdout}\n${结果.stderr}`);
   return {
-    enabled: 启用(),
+    enabled,
     available: true,
-    command: 探测结果.command,
+    // 未启用时不暴露二进制路径；启用后如实报告探测到的命令（可能是绝对路径）。
+    command: enabled ? 探测结果.command : null,
     version: 探测结果.version,
     connected: 解析.connected,
     connecting: 解析.connecting,

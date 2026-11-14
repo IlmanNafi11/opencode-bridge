@@ -102,7 +102,11 @@ describe("server unit & integration tests", () => {
     const canDerive = Boolean(identity.resolveModelAlias("mimo"));
     if (canDerive) {
       assert.equal(normalizeModel("zen/mimo"), "mimo-v2.6-flash-free");
-      assert.equal(normalizeModel("opencode/longcat"), "longcat-2.5-preview-free");
+      // 目录把 `longcat` 家族指向当下的具体修订；断言"解析到 longcat 家族的
+      // 某个真实 id"而不是钉死某个修订号 —— 上游换修订不该让测试变红。
+      const longcat = normalizeModel("opencode/longcat");
+      assert.match(longcat, /^longcat-[0-9.]+(-preview)?-free$/);
+      assert.equal(longcat, identity.resolveModelAlias("longcat"));
     } else {
       assert.equal(normalizeModel("zen/mimo"), "mimo");
       assert.equal(normalizeModel("opencode/longcat"), "longcat");
