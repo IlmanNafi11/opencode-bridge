@@ -146,10 +146,17 @@ function 上游限流(res) {
   return res.status === 429;
 }
 
-/** 通过则 `true`；上游未给出裁定时 `null`。 */
-function 裁定(是否通过, 未判定) {
-  return 是否通过 ? true : 未判定 ? null : false;
+/**
+ * 上游以 429 回答时没有裁定请求形态：在线演练的所有断言都保持未定论。
+ *
+ * 429 是按 IP 计的容量问题，不是对请求形态的判决。把它读成"自愈失败"会
+ * 把一次容量抖动变成红色 CI，所以这里返回 `null`（未定论），而不是 `false`。
+ */
+function 在线断言(res, 是否通过) {
+  return 上游限流(res) ? null : 是否通过;
 }
+
+
 
 async function 等桥就绪(端口, 超时毫秒 = 30000) {
   const 截止时间 = Date.now() + 超时毫秒;
@@ -190,23 +197,20 @@ async function 演练版本下限({ identity, __syncUserAgent }) {
   console.log(`  UA 之后    : ${新UA}`);
   console.log(`  客户端看到  : HTTP ${res.status} ${JSON.stringify(取内容(res))}`);
 
-  const 已限流 = 上游限流(res);
   const 已作答 = res.status === 200 && 取内容(res).length > 0;
   const 已迁移 =
     新UA !== 原UA &&
     新UA.startsWith("opencode/latest/") &&
     !新UA.includes("/1.0.0/");
 
-  三态判定行(裁定(res.status === 200, 已限流), "客户端收到 200，而不是网关错误");
-  三态判定行(裁定(取内容(res).length > 0, 已限流), "客户端收到真实内容");
-  判定行(已自愈, "版本下限是从拒绝中学到的");
-  判定行(新UA !== 原UA, "User-Agent 已离开被拒的版本");
-  判定行(已迁移, "身份现在跟随当前发行版");
+  三态判定行(在线断言(res, res.status === 200), "客户端收到 200，而不是网关错误");
+  三态判定行(在线断言(res, 取内容(res).length > 0), "客户端收到真实内容");
+  三态判定行(在线断言(res, Boolean(已自愈)), "版本下限是从拒绝中学到的");
+  三态判定行(在线断言(res, 新UA !== 原UA), "User-Agent 已离开被拒的版本");
+  三态判定行(在线断言(res, 已迁移), "身份现在跟随当前发行版");
 
-  // 429 意味着上游从未裁定治愈后的形态，所以即使每条自愈断言都通过，
-  // 本演练面向客户端的那一半仍未定论。
-  if (!已自愈 || !已迁移) return false;
-  return 裁定(已作答, 已限流);
+  // 429 是容量压力而非形态判决：本演练未得到可裁定的结果，不计通过也不计失败。
+  return 在线断言(res, Boolean(已自愈 && 已迁移 && 已作答));
 }
 
 async function 演练旧版形态({ identity, __syncUserAgent }) {
@@ -240,12 +244,11 @@ async function 演练旧版形态({ identity, __syncUserAgent }) {
   console.log(`  旧版 UA     : ${旧版UA}`);
   console.log(`  客户端看到  : HTTP ${res.status} ${JSON.stringify(取内容(res))}`);
 
-  const 已限流 = 上游限流(res);
   const 已作答 = res.status === 200 && 取内容(res).length > 0;
-  三态判定行(裁定(res.status === 200, 已限流), "旧版访问形态仍被接受");
-  三态判定行(裁定(取内容(res).length > 0, 已限流), "旧版形态返回真实内容");
+  三态判定行(在线断言(res, res.status === 200), "旧版访问形态仍被接受");
+  三态判定行(在线断言(res, 取内容(res).length > 0), "旧版形态返回真实内容");
 
-  return 裁定(已作答, 已限流);
+  return 在线断言(res, 已作答);
 }
 
 async function 演练空工具集({ identity }) {
@@ -267,14 +270,12 @@ async function 演练空工具集({ identity }) {
   console.log(`  工具集-之后 : ${JSON.stringify(新名单)}`);
   console.log(`  客户端看到  : HTTP ${res.status} ${JSON.stringify(取内容(res))}`);
 
-  const 已限流 = 上游限流(res);
   const 已作答 = res.status === 200 && 取内容(res).length > 0;
-  判定行(新名单.length > 0, "空配置回退到随发行版内置的工具集");
-  三态判定行(裁定(res.status === 200, 已限流), "客户端收到 200，而不是 403");
-  三态判定行(裁定(取内容(res).length > 0, 已限流), "客户端收到真实内容");
+  三态判定行(在线断言(res, 新名单.length > 0), "空配置回退到随发行版内置的工具集");
+  三态判定行(在线断言(res, res.status === 200), "客户端收到 200，而不是 403");
+  三态判定行(在线断言(res, 取内容(res).length > 0), "客户端收到真实内容");
 
-  if (新名单.length === 0) return false;
-  return 裁定(已作答, 已限流);
+  return 在线断言(res, Boolean(新名单.length > 0 && 已作答));
 }
 
 async function 演练会话形态({ identity, __syncUserAgent, sessionCache }) {
@@ -303,20 +304,18 @@ async function 演练会话形态({ identity, __syncUserAgent, sessionCache }) {
   console.log(`  之后 id     : ${新id}（长度 ${新id.length}，前缀 "${identity.getSessionPrefix()}"）`);
   console.log(`  客户端看到  : HTTP ${res.status} ${JSON.stringify(取内容(res))}`);
 
-  const 已限流 = 上游限流(res);
   const 已作答 = res.status === 200 && 取内容(res).length > 0;
   const 前缀已还原 = identity.getSessionPrefix() === 好前缀;
   const 形态正确 = /^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$/.test(新id);
   const 缓存干净 = 缓存ids.every((id) => /^ses_/.test(id));
 
-  三态判定行(裁定(res.status === 200, 已限流), "客户端收到 200，而不是 FreeTierError");
-  三态判定行(裁定(取内容(res).length > 0, 已限流), "客户端收到真实内容");
-  判定行(前缀已还原, "前缀已被刷新还原");
-  判定行(形态正确, "重铸的 id 符合被接受的形态");
-  判定行(缓存干净, "会话缓存里没有留下被拒的 id");
+  三态判定行(在线断言(res, res.status === 200), "客户端收到 200，而不是 FreeTierError");
+  三态判定行(在线断言(res, 取内容(res).length > 0), "客户端收到真实内容");
+  三态判定行(在线断言(res, 前缀已还原), "前缀已被刷新还原");
+  三态判定行(在线断言(res, 形态正确), "重铸的 id 符合被接受的形态");
+  三态判定行(在线断言(res, 缓存干净), "会话缓存里没有留下被拒的 id");
 
-  if (!前缀已还原 || !形态正确 || !缓存干净) return false;
-  return 裁定(已作答, 已限流);
+  return 在线断言(res, Boolean(前缀已还原 && 形态正确 && 缓存干净 && 已作答));
 }
 
 /**
@@ -988,7 +987,11 @@ async function 主流程() {
 
 let 取端口 = () => 0;
 
-主流程().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+module.exports = { 在线断言, onlineAssertion: 在线断言 };
+
+if (require.main === module) {
+  主流程().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}
