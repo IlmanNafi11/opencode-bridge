@@ -56,6 +56,18 @@ Fleet C2 egress registry (Armada Cerdas), optional:
   nodes get cooldown but a coarse `403` signal — fixing that requires changing
   `proxy.js`, which the fleet layer deliberately does not touch.
 
+- **Node compat suite matches the supported runtimes.** `server.js` refuses
+  to boot under plain `node` (the free-tier gateway rejects its TLS
+  fingerprint), which made every e2e test that spawned it fail under
+  `npm run test:node` with hung waits (`cancelledByParent`) or `503` from
+  routes that need `bun:sqlite`. Tests now spawn through
+  `test/spawn-helper.js` with `ALLOW_NODE=1` so the HTTP contract is
+  verified on both runtimes, and the fleet e2e suite skips under Node —
+  same policy as `fleet.test.js` / `fleet-panel-routes.test.js`.
+  `gate-drill.js` gained a `module.exports` so its 429-inconclusive
+  semantics are unit-tested (`test/gate-drill.test.js`) instead of only
+  exercised live.
+
 ## [0.1.6] — 2026-11-11
 
 Operations hardening and panel follow-through:
