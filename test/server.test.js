@@ -154,6 +154,10 @@ describe("server unit & integration tests", () => {
   });
 
   it("buildUpstreamHeaders and buildUpstreamPayload satisfy OpenCode v2 /inference/v1 gate", () => {
+    // identity 在模块加载时热启动磁盘上的发行版缓存。缓存内容随机器而变，
+    // 而这里断言的是随发行版内置的形态，所以先清空推导状态再断言。
+    identity.__reset();
+    identity.__setLastCheckTime(Date.now());
     const sessionId = "ses_" + createId(true);
     const headers = buildUpstreamHeaders({ headers: { "user-agent": "OpenAI/Python" } }, sessionId);
     assert.match(headers["User-Agent"], /^opencode\/latest\/\d+\.\d+\.\d+\/cli$/);

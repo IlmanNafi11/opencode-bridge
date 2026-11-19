@@ -4,6 +4,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const http = require("node:http");
+const { 启动子进程 } = require("./spawn-helper");
 
 // 独立子进程：server.js 在模块加载时读取 PORT/状态目录等环境变量，共享进程
 // 里改 env 会串到别的测试文件（例如 compat-e2e 的模型目录），所以这里隔离运行。
@@ -51,7 +52,7 @@ async function waitForHealth() {
 
 describe("panel login", () => {
   before(async () => {
-    child = Bun.spawn([process.execPath, "server.js"], {
+    child = 启动子进程([process.execPath, "server.js"], {
       cwd: path.resolve(__dirname, ".."),
       env: {
         ...process.env,
@@ -61,6 +62,7 @@ describe("panel login", () => {
         FUCKING_OPENCODE_STATE_DIR: tmpDir,
         OPENCODE_OFFLINE: "1",
         AUTO_UPDATE: "0",
+        ALLOW_NODE: "1",
       },
       stdout: "ignore",
       stderr: "ignore",

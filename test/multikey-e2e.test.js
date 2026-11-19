@@ -4,11 +4,11 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const http = require("node:http");
+const { 启动子进程 } = require("./spawn-helper");
 
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ofb-multikey-test-"));
 const PORT = 20378;
 let child;
-
 function request(method, urlPath, body, headers = {}) {
   return new Promise((resolve, reject) => {
     const payload = body === undefined ? null : JSON.stringify(body);
@@ -56,7 +56,7 @@ function countTokens(key) {
 
 describe("多个环境变量 API key", () => {
   before(async () => {
-    child = Bun.spawn([process.execPath, "server.js"], {
+    child = 启动子进程([process.execPath, "server.js"], {
       cwd: path.resolve(__dirname, ".."),
       env: {
         ...process.env,
@@ -66,6 +66,7 @@ describe("多个环境变量 API key", () => {
         FUCKING_OPENCODE_API_KEYS: "first-key-alpha,second-key-beta",
         OPENCODE_OFFLINE: "1",
         AUTO_UPDATE: "0",
+        ALLOW_NODE: "1",
       },
       stdout: "ignore",
       stderr: "ignore",

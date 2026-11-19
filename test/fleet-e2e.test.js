@@ -5,6 +5,10 @@ const os = require("node:os");
 const path = require("node:path");
 const http = require("node:http");
 
+const isBun = typeof process !== "undefined" && Boolean(process.versions && process.versions.bun);
+// fleet.db 依赖 bun:sqlite。Node 下整个 HTTP 面都会以 503 sqlite_unavailable
+// 作答，所以整个 suite 跳过——与 fleet.test.js / fleet-panel-routes.test.js 一致。
+const 需要Bun = isBun ? false : "bun:sqlite 不可用（Node）";
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ofb-fleet-e2e-"));
 process.env.FUCKING_OPENCODE_STATE_DIR = tmpDir;
 delete process.env.FLEET_DB_PATH;
@@ -48,7 +52,7 @@ function request(port, method, urlPath, body, headers = {}) {
   });
 }
 
-describe("/api/fleet/* HTTP surface", () => {
+describe("/api/fleet/* HTTP surface", { skip: 需要Bun }, () => {
   let port;
   let server;
 
@@ -120,7 +124,7 @@ describe("/api/fleet/* HTTP surface", () => {
   });
 });
 
-describe("/api/fleet/probe", () => {
+describe("/api/fleet/probe", { skip: 需要Bun }, () => {
   let port;
   let server;
   let nodeId;
@@ -190,7 +194,7 @@ describe("/api/fleet/probe", () => {
   });
 });
 
-describe("/api/fleet/health-monitor", () => {
+describe("/api/fleet/health-monitor", { skip: 需要Bun }, () => {
   let port;
   let server;
 
@@ -225,7 +229,7 @@ describe("/api/fleet/health-monitor", () => {
   });
 });
 
-describe("/api/fleet/apply-pool", () => {
+describe("/api/fleet/apply-pool", { skip: 需要Bun }, () => {
   let port;
   let server;
 
@@ -301,7 +305,7 @@ describe("/api/fleet/apply-pool", () => {
   });
 });
 
-describe("/api/fleet/status & /api/fleet/events", () => {
+describe("/api/fleet/status & /api/fleet/events", { skip: 需要Bun }, () => {
   let port;
   let server;
 

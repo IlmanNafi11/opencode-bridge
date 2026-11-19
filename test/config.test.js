@@ -4,13 +4,13 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const http = require("node:http");
+const { 启动子进程 } = require("./spawn-helper");
 
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ofb-config-test-"));
 const configFile = path.join(tmpDir, "config.json");
 const PORT = 20382;
 let config;
 let child;
-
 function 写配置(值) {
   fs.writeFileSync(configFile, JSON.stringify(值));
   const now = new Date();
@@ -156,7 +156,7 @@ describe("运行时配置", () => {
 
   it("通过 /api/config 暴露生效值与来源", async () => {
     写配置({ defaultModel: "route-model" });
-    child = Bun.spawn([process.execPath, "server.js"], {
+    child = 启动子进程([process.execPath, "server.js"], {
       cwd: path.resolve(__dirname, ".."),
       env: {
         ...process.env,
@@ -166,6 +166,7 @@ describe("运行时配置", () => {
         FUCKING_OPENCODE_CONFIG: configFile,
         OPENCODE_OFFLINE: "1",
         AUTO_UPDATE: "0",
+        ALLOW_NODE: "1",
       },
       stdout: "ignore",
       stderr: "ignore",
